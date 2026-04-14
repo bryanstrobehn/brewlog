@@ -4,10 +4,48 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Brewlog</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="src/style.css" />
 </head>
 <body>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { padding-top: 44px; }
+  #pnav { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 1.25rem; background: #1c1c1e; border-bottom: 2px solid #2e2e32; font-family: 'Space Grotesk', system-ui, sans-serif; }
+  #pnav-back { font-size: 0.8rem; font-weight: 500; letter-spacing: 0.01em; color: #8e8e96; text-decoration: none; transition: color 0.12s; }
+  #pnav-back:hover { color: #e8e8ea; }
+  #pnav-btn { background: none; border: 1.5px solid #2e2e32; border-radius: 3px; color: #6e6e76; cursor: pointer; padding: 5px 7px; line-height: 0; transition: color 0.12s, border-color 0.12s, background 0.12s; }
+  #pnav-btn:hover, #pnav-btn.open { color: #e0e0e4; border-color: #4e4e54; background: #28282c; }
+  #pnav-pop { position: fixed; top: 48px; right: 1.25rem; background: #1c1c1e; border: 2px solid #3a3a3e; border-radius: 4px; padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 272px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); visibility: hidden; opacity: 0; pointer-events: none; transform: translateY(-6px); transition: opacity 0.14s, transform 0.14s; }
+  #pnav-pop.open { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); }
+  #pnav-pop a { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 3px; text-decoration: none; color: #b0b0b8; font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 0.82rem; font-weight: 500; transition: background 0.1s, color 0.1s; }
+  #pnav-pop a:hover { background: #28282c; color: #f0f0f2; }
+  #pnav-pop a.pnav-cur { background: #28282c; color: #f0f0f2; font-weight: 600; }
+</style>
+<div id="pnav">
+  <a href="https://bryanstrobehn.github.io/projects/index.html" id="pnav-back">← Back to Apps</a>
+  <button id="pnav-btn" aria-label="All projects">
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><circle cx="1.5" cy="1.5" r="1.5"/><circle cx="7.5" cy="1.5" r="1.5"/><circle cx="13.5" cy="1.5" r="1.5"/><circle cx="1.5" cy="7.5" r="1.5"/><circle cx="7.5" cy="7.5" r="1.5"/><circle cx="13.5" cy="7.5" r="1.5"/><circle cx="1.5" cy="13.5" r="1.5"/><circle cx="7.5" cy="13.5" r="1.5"/><circle cx="13.5" cy="13.5" r="1.5"/></svg>
+  </button>
+  <div id="pnav-pop">
+    <a href="https://bryanstrobehn.github.io/projects/bpm-finder.html">🎵 BPM Finder</a>
+    <a href="https://bryanstrobehn.github.io/projects/converter.html">🔄 Converter</a>
+    <a href="https://bryanstrobehn.github.io/projects/grab.html">📹 Grab</a>
+    <a href="https://bryanstrobehn.github.io/projects/midi-shaper.html">🎹 MIDI Shaper</a>
+    <a href="https://bryanstrobehn.github.io/projects/poop-tracker.html">💩 Poop Tracker</a>
+    <a href="https://bryanstrobehn.github.io/projects/treasure-fleet.html">🗺️ Treasure Fleet</a>
+    <a href="https://bryanstrobehn.github.io/brewlog" class="pnav-cur">🍺 Brew Log</a>
+    <a href="https://github.com/bryanstrobehn/pdf-viewer/releases/latest" target="_blank">📄 ViewDaFile</a>
+  </div>
+</div>
+<script>
+(function(){
+  var btn=document.getElementById('pnav-btn'),pop=document.getElementById('pnav-pop');
+  btn.addEventListener('click',function(e){e.stopPropagation();var o=pop.classList.toggle('open');btn.classList.toggle('open',o);});
+  document.addEventListener('click',function(){pop.classList.remove('open');btn.classList.remove('open');});
+  pop.addEventListener('click',function(e){e.stopPropagation();});
+})();
+</script>
   <div id="app"></div>
-  <script type="module" src="main.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>

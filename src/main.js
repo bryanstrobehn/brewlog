@@ -6,6 +6,7 @@ import {
   saveImage, loadAllImages, deleteImage,
   EMPTY_BATCH, STATUS
 } from "./data.js";
+import TEMPLATES, { TEMPLATE_GROUPS, ALL_TYPES } from "./templates.js";
 
 // ─── App state ────────────────────────────────────────────────────────────────
 let state = {
@@ -18,9 +19,11 @@ let state = {
 // localBatch: working copy of the active batch; unsaved edits live here only.
 // dirty: true when localBatch has changes not yet written to localStorage.
 // imageCache: batchId → dataUrl, populated from IndexedDB on boot.
-let localBatch = null;
-let dirty      = false;
-let imageCache = new Map();
+let localBatch          = null;
+let dirty               = false;
+let imageCache          = new Map();
+let ingredientsCollapsed = false;
+let dragIngId           = null; // ingredient ID being dragged
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 loadAllImages().then(map => { imageCache = map; render(); }).catch(() => render());
@@ -87,6 +90,7 @@ function syncFormToLocalBatch() {
           name:   row.querySelector("[data-ing-field='name']")?.value   ?? "",
           amount: row.querySelector("[data-ing-field='amount']")?.value ?? "",
           unit:   row.querySelector("[data-ing-field='unit']")?.value   ?? "",
+          note:   row.querySelector("[data-ing-field='note']")?.value   ?? "",
         };
       }),
     };
@@ -148,9 +152,44 @@ function resizeImage(dataUrl, maxDim = 900) {
   });
 }
 
+// ─── New-batch modal ──────────────────────────────────────────────────────────
+function renderNewBatchModal() {
+  const customTemplates = state.batches.filter(b => b.isTemplate);
+  const customGroup = customTemplates.length ? `
+    <optgroup label="My Templates">
+      ${customTemplates.map(b => `<option value="custom:${b.id}">${b.name}</option>`).join("")}
+    </optgroup>
+  ` : "";
+  const builtinGroups = TEMPLATE_GROUPS.map(g => `
+    <optgroup label="${g.group}">
+      ${g.types.map(t => `<option value="${t}">${t}</option>`).join("")}
+    </optgroup>
+  `).join("");
+  return `
+    <div class="modal-backdrop" id="modal-backdrop">
+      <div class="modal">
+        <h2 class="modal-title">New batch</h2>
+        <label class="modal-label">
+          Start from a template
+          <select class="input" id="template-select">
+            <option value="blank">— Start from scratch —</option>
+            ${customGroup}
+            ${builtinGroups}
+          </select>
+        </label>
+        <div class="modal-actions">
+          <button class="btn" id="btn-modal-cancel">Cancel</button>
+          <button class="btn btn-primary" id="btn-modal-create">Create batch</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ─── List view ────────────────────────────────────────────────────────────────
 function renderListView() {
-  const batches = state.batches;
+  const regular   = state.batches.filter(b => !b.isTemplate);
+  const templates = state.batches.filter(b => b.isTemplate);
   return `
     <div class="layout">
       <header class="topbar">
@@ -163,31 +202,66 @@ function renderListView() {
       </header>
 
       <main class="list-main">
-        ${batches.length === 0 ? `
+        <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes. Your data stays on your device; nothing is sent anywhere.</p>
+
+        ${regular.length === 0 ? `
           <div class="empty-state">
             <p>No batches yet.</p>
             <button class="btn btn-primary" id="btn-new-empty">Add your first batch</button>
           </div>
         ` : `
           <div class="batch-grid">
-            ${batches.map(renderBatchCard).join("")}
+            ${regular.map(renderBatchCard).join("")}
           </div>
         `}
+
+        ${templates.length ? `
+          <div class="templates-section">
+            <span class="section-label">My Templates</span>
+            <div class="batch-grid">
+              ${templates.map(renderBatchCard).join("")}
+            </div>
+          </div>
+        ` : ""}
       </main>
     </div>
     <input type="file" id="file-import" accept=".json" style="display:none" />
   `;
 }
 
+function showNewBatchModal() {
+  // Append modal to body so it overlays everything
+  const el = document.createElement("div");
+  el.innerHTML = renderNewBatchModal();
+  document.body.appendChild(el.firstElementChild);
+
+  document.getElementById("btn-modal-cancel")?.addEventListener("click", closeNewBatchModal);
+  document.getElementById("modal-backdrop")?.addEventListener("click", (e) => {
+    if (e.target.id === "modal-backdrop") closeNewBatchModal();
+  });
+  document.getElementById("btn-modal-create")?.addEventListener("click", () => {
+    const type = document.getElementById("template-select")?.value ?? "blank";
+    closeNewBatchModal();
+    createNewBatch(type);
+  });
+}
+
+function closeNewBatchModal() {
+  document.getElementById("modal-backdrop")?.remove();
+}
+
 function renderBatchCard(batch) {
   const img = imageCache.get(batch.id);
   return `
-    <div class="batch-card" data-id="${batch.id}">
+    <div class="batch-card${batch.isTemplate ? " batch-card-template" : ""}" data-id="${batch.id}">
       ${img ? `<img class="card-img" src="${img}" alt="" />` : ""}
       <div class="card-body">
         <div class="card-top">
           <span class="card-name">${batch.name || "Untitled batch"}</span>
-          <span class="status-badge status-${batch.status.toLowerCase().replace(/ /g, "-")}">${batch.status}</span>
+          ${batch.isTemplate
+            ? `<span class="template-badge">Template</span>`
+            : `<span class="status-badge status-${batch.status.toLowerCase().replace(/ /g, "-")}">${batch.status}</span>`
+          }
         </div>
         <div class="card-meta">
           <span>${batch.style}</span>
@@ -211,9 +285,15 @@ function renderBatchView(batch) {
           <button class="btn ${state.brewMode ? "btn-primary" : ""}" id="btn-brew-mode">
             ${state.brewMode ? "Exit brew mode" : "Brew mode"}
           </button>
-          <button class="btn" id="btn-export-batch">Export JSON</button>
-          <button class="btn" id="btn-share-batch">Copy share link</button>
-          <button class="btn btn-danger" id="btn-delete-batch">Delete</button>
+          <div class="topbar-menu-wrap">
+            <button class="btn" id="btn-batch-menu" aria-label="More options">☰</button>
+            <div class="topbar-menu" id="batch-menu-pop">
+              <button class="menu-item" id="btn-export-batch">Export JSON</button>
+              <button class="menu-item" id="btn-share-batch">Copy share link</button>
+              <button class="menu-item" id="btn-save-template">Save as template</button>
+              <button class="menu-item menu-item-danger" id="btn-delete-batch">Delete</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -226,6 +306,11 @@ function renderBatchView(batch) {
       </div>
 
       <main class="batch-main">
+        ${batch.isTemplate ? `
+          <div class="template-banner">
+            This is a template — if you're trying to log a brew, go back and create a new batch from this template instead.
+          </div>
+        ` : ""}
         ${renderTab(batch)}
       </main>
     </div>
@@ -267,13 +352,18 @@ function renderRecipeTab(batch) {
 
       <section class="section">
         <div class="section-header">
-          <span class="section-label">Ingredients</span>
-          ${editing ? `<button class="btn-add" id="btn-add-ingredient">+ Add</button>` : ""}
+          <button class="btn btn-collapse" id="btn-toggle-ingredients">
+            ${ingredientsCollapsed ? "▸" : "▾"}&nbsp;&nbsp;Ingredients
+            ${ingredientsCollapsed && batch.ingredients.length > 0
+              ? `<span class="collapse-count">${batch.ingredients.length}</span>` : ""}
+          </button>
+          ${editing && !ingredientsCollapsed ? `<button class="btn-add" id="btn-add-ingredient">+ Add</button>` : ""}
         </div>
-        ${batch.ingredients.length === 0
-          ? `<p class="empty-hint">No ingredients yet.</p>`
-          : batch.ingredients.map(ing => renderIngredientRow(ing, editing)).join("")
-        }
+        ${!ingredientsCollapsed ? (
+          batch.ingredients.length === 0
+            ? `<p class="empty-hint">No ingredients yet.</p>`
+            : batch.ingredients.map(ing => renderIngredientRow(ing, editing)).join("")
+        ) : ""}
       </section>
 
       <section class="section">
@@ -284,7 +374,7 @@ function renderRecipeTab(batch) {
         ${editing ? `<p class="section-hint">Add steps below. Markdown is supported in descriptions.</p>` : ""}
         ${batch.steps.length === 0
           ? `<p class="empty-hint">No steps yet.</p>`
-          : batch.steps.map((step, i) => renderStepRow(step, i, editing, state.brewMode)).join("")
+          : batch.steps.map((step, i) => renderStepRow(step, i, editing, state.brewMode, batch.ingredients)).join("")
         }
         ${showDone ? `
           <div class="brew-done-banner">
@@ -304,8 +394,11 @@ function renderBatchMeta(batch) {
         <label>Name<input class="input" type="text" data-field="name" value="${batch.name}" placeholder="e.g. Blackberry Melomel #2" /></label>
         <label>Style
           <select class="input" data-field="style">
-            ${["Mead", "Melomel", "Metheglin", "Cyser", "Braggot", "Ale", "Stout", "Porter", "IPA", "Lager", "Wheat", "Cider", "Wine", "Kombucha", "Other"]
-              .map(s => `<option ${batch.style === s ? "selected" : ""}>${s}</option>`).join("")}
+            ${TEMPLATE_GROUPS.map(g => `
+              <optgroup label="${g.group}">
+                ${g.types.map(t => `<option ${batch.style === t ? "selected" : ""}>${t}</option>`).join("")}
+              </optgroup>
+            `).join("")}
           </select>
         </label>
         <label>Status
@@ -343,21 +436,43 @@ function renderBatchMetaReadOnly(batch) {
 function renderIngredientRow(ing, editing) {
   if (!editing) return `
     <div class="row-read">
-      <span>${ing.name}</span>
+      <div>
+        <span>${ing.name}</span>
+        ${ing.note ? `<div class="ing-note">${ing.note}</div>` : ""}
+      </div>
       <span class="muted">${ing.amount}${ing.unit ? " " + ing.unit : ""}</span>
     </div>
   `;
   return `
-    <div class="ingredient-row" data-ing-id="${ing.id}">
-      <input class="input input-sm" type="text" data-ing-field="name"   value="${ing.name}"   placeholder="Ingredient" />
-      <input class="input input-sm input-amount" type="text" data-ing-field="amount" value="${ing.amount}" placeholder="Amount" />
-      <input class="input input-sm input-unit"   type="text" data-ing-field="unit"   value="${ing.unit}"   placeholder="Unit" />
-      <button class="btn-remove" data-remove-ing="${ing.id}">×</button>
+    <div class="ingredient-row" data-ing-id="${ing.id}" draggable="true">
+      <div class="ing-main-row">
+        <span class="drag-handle" title="Drag to reorder">⠿</span>
+        <input class="input input-sm" type="text" data-ing-field="name"   value="${ing.name}"   placeholder="Ingredient" />
+        <input class="input input-sm input-amount" type="text" data-ing-field="amount" value="${ing.amount}" placeholder="Amount" />
+        <input class="input input-sm input-unit"   type="text" data-ing-field="unit"   value="${ing.unit}"   placeholder="Unit" />
+        <button class="btn-remove" data-remove-ing="${ing.id}">×</button>
+      </div>
+      <input class="input input-sm ing-note-input" type="text" data-ing-field="note"
+             value="${ing.note || ""}" placeholder="Note (optional)" />
     </div>
   `;
 }
 
-function renderStepRow(step, idx, editing, brewMode) {
+function renderStepRow(step, idx, editing, brewMode, ingredients = []) {
+  const refs = step.ingredientRefs ?? [];
+
+  // Pills shown in read and brew modes for any linked ingredients
+  const refPills = refs.length
+    ? `<div class="step-ing-pills">
+        ${refs.map(r => {
+          const ing = ingredients.find(i => i.id === r.ingId);
+          return ing
+            ? `<span class="step-ing-pill">${ing.name}${r.note ? `<span class="step-ing-pill-note"> — ${r.note}</span>` : ""}</span>`
+            : "";
+        }).join("")}
+       </div>`
+    : "";
+
   if (brewMode) return `
     <div class="step-row ${step.completed ? "step-done" : ""}">
       <button class="step-check ${step.completed ? "checked" : ""}" data-toggle-step="${step.id}">
@@ -366,19 +481,46 @@ function renderStepRow(step, idx, editing, brewMode) {
       <div class="step-body">
         <div class="step-name">${step.name || "(untitled step)"}</div>
         ${step.description ? `<div class="step-desc">${renderMarkdown(step.description)}</div>` : ""}
+        ${refPills}
         ${step.completedAt ? `<div class="step-time muted">Done ${step.completedAt}</div>` : ""}
       </div>
     </div>
   `;
+
   if (!editing) return `
     <div class="step-row">
       <span class="step-num">${idx + 1}</span>
       <div class="step-body">
         <div class="step-name">${step.name || "(untitled step)"}</div>
         ${step.description ? `<div class="step-desc">${renderMarkdown(step.description)}</div>` : ""}
+        ${refPills}
       </div>
     </div>
   `;
+
+  // Edit mode — linked ingredient rows + link picker
+  const unlinkedIngs = ingredients.filter(ing => !refs.some(r => r.ingId === ing.id));
+  const refRows = refs.map(r => {
+    const ing = ingredients.find(i => i.id === r.ingId);
+    if (!ing) return "";
+    return `
+      <div class="step-ing-ref-row">
+        <span class="step-ing-ref-name">${ing.name || "Unnamed"}</span>
+        <input class="input input-sm step-ing-ref-note" type="text"
+               data-ref-note-step="${step.id}" data-ref-note-ing="${r.ingId}"
+               value="${r.note}" placeholder="Amount / note (optional)" />
+        <button class="btn-remove" data-unlink-step="${step.id}" data-unlink-ing="${r.ingId}">×</button>
+      </div>
+    `;
+  }).join("");
+
+  const linkSelect = unlinkedIngs.length
+    ? `<select class="input input-sm step-ing-link-select" data-link-step="${step.id}">
+        <option value="">+ Link ingredient…</option>
+        ${unlinkedIngs.map(ing => `<option value="${ing.id}">${ing.name || "Unnamed"}</option>`).join("")}
+       </select>`
+    : "";
+
   return `
     <div class="step-row" data-step-id="${step.id}">
       <span class="step-num">${idx + 1}</span>
@@ -388,6 +530,12 @@ function renderStepRow(step, idx, editing, brewMode) {
         <textarea class="input input-sm textarea" data-step-field="description"
                   placeholder="Description (markdown supported)"
                   style="width:100%;margin-top:4px;min-height:56px">${step.description || ""}</textarea>
+        ${refRows || linkSelect ? `
+          <div class="step-ing-refs">
+            ${refRows}
+            ${linkSelect}
+          </div>
+        ` : ""}
       </div>
       <button class="btn-remove" data-remove-step="${step.id}">×</button>
     </div>
@@ -515,8 +663,8 @@ let selectedAttrs = [];
 
 function bindEvents() {
   // ── List view ──
-  on("btn-new",         () => createNewBatch());
-  on("btn-new-empty",   () => createNewBatch());
+  on("btn-new",         () => showNewBatchModal());
+  on("btn-new-empty",   () => showNewBatchModal());
   on("btn-export-full", () => exportAll(state.batches));
   on("btn-import-full", () => document.getElementById("file-import")?.click());
   on("file-import",     (e) => handleFileImport(e), "change");
@@ -547,6 +695,22 @@ function bindEvents() {
     setState({ brewMode: !state.brewMode });
   });
 
+  // ── Hamburger menu ──
+  const menuBtn = document.getElementById("btn-batch-menu");
+  const menuPop = document.getElementById("batch-menu-pop");
+  if (menuBtn && menuPop) {
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = menuPop.classList.toggle("open");
+      menuBtn.classList.toggle("open", open);
+    });
+    document.addEventListener("click", () => {
+      menuPop.classList.remove("open");
+      menuBtn.classList.remove("open");
+    });
+    menuPop.addEventListener("click", (e) => e.stopPropagation());
+  }
+
   on("btn-export-batch", () => { const b = currentBatch(); if (b) exportBatch(b); });
 
   on("btn-share-batch", () => {
@@ -556,10 +720,37 @@ function bindEvents() {
     alert("Share link copied to clipboard!");
   });
 
+  on("btn-save-template", () => {
+    if (!localBatch) return;
+    syncFormToLocalBatch();
+    const template = {
+      ...localBatch,
+      id:          newId(),
+      name:        localBatch.name,
+      isTemplate:  true,
+      status:      STATUS.PLANNING,
+      startDate:   "",
+      gravityLog:  [],
+      tastingNotes:[],
+      processLog:  [],
+      steps:       localBatch.steps.map(s => ({ ...s, id: newId(), completed: false, completedAt: null })),
+      ingredients: localBatch.ingredients.map(i => ({ ...i, id: newId() })),
+    };
+    const batches = saveBatch(template, state.batches);
+    state = { ...state, batches };
+    document.getElementById("batch-menu-pop")?.classList.remove("open");
+    document.getElementById("btn-batch-menu")?.classList.remove("open");
+    alert(`"${template.name}" saved as a template. Find it under "My Templates" when creating a new batch.`);
+    render();
+  });
+
   on("btn-delete-batch", () => {
     const b = currentBatch();
     if (!b) return;
-    if (!confirm(`Are you sure you want to delete "${b.name}"? This cannot be undone.`)) return;
+    const templateLine = b.isTemplate
+      ? "\n\nThis is a template — deleting it will remove it from the options when creating a new batch."
+      : "";
+    if (!confirm(`Are you sure you want to delete "${b.name}"? This cannot be undone.${templateLine}`)) return;
     deleteImage(b.id).catch(() => {});
     imageCache.delete(b.id);
     dirty = false;
@@ -610,10 +801,17 @@ function bindEvents() {
     });
   });
 
+  // ── Ingredients collapse toggle ──
+  on("btn-toggle-ingredients", () => {
+    if (dirty) syncFormToLocalBatch();
+    ingredientsCollapsed = !ingredientsCollapsed;
+    render();
+  });
+
   on("btn-add-ingredient", () => {
     if (!localBatch) return;
     syncFormToLocalBatch();
-    const ing = { id: newId(), name: "", amount: "", unit: "" };
+    const ing = { id: newId(), name: "", amount: "", unit: "", note: "" };
     localBatch = { ...localBatch, ingredients: [...localBatch.ingredients, ing] };
     setDirty(true);
     render();
@@ -624,6 +822,40 @@ function bindEvents() {
       if (!localBatch) return;
       syncFormToLocalBatch();
       localBatch = { ...localBatch, ingredients: localBatch.ingredients.filter(i => i.id !== el.dataset.removeIng) };
+      setDirty(true);
+      render();
+    });
+  });
+
+  // ── Ingredient drag-and-drop reorder ──
+  document.querySelectorAll("[data-ing-id][draggable]").forEach(row => {
+    row.addEventListener("dragstart", (e) => {
+      dragIngId = row.dataset.ingId;
+      e.dataTransfer.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      dragIngId = null;
+      document.querySelectorAll(".ingredient-row").forEach(r => r.classList.remove("drag-over", "dragging"));
+    });
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (row.dataset.ingId !== dragIngId) row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("drag-over");
+      if (!localBatch || !dragIngId || dragIngId === row.dataset.ingId) return;
+      syncFormToLocalBatch();
+      const ings   = [...localBatch.ingredients];
+      const fromIdx = ings.findIndex(i => i.id === dragIngId);
+      const toIdx   = ings.findIndex(i => i.id === row.dataset.ingId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = ings.splice(fromIdx, 1);
+      ings.splice(toIdx, 0, moved);
+      localBatch = { ...localBatch, ingredients: ings };
       setDirty(true);
       render();
     });
@@ -647,7 +879,7 @@ function bindEvents() {
   on("btn-add-step", () => {
     if (!localBatch) return;
     syncFormToLocalBatch();
-    const step = { id: newId(), order: localBatch.steps.length, name: "", description: "", completed: false, completedAt: null };
+    const step = { id: newId(), order: localBatch.steps.length, name: "", description: "", ingredientRefs: [], completed: false, completedAt: null };
     localBatch = { ...localBatch, steps: [...localBatch.steps, step] };
     setDirty(true);
     render();
@@ -660,6 +892,64 @@ function bindEvents() {
       localBatch = { ...localBatch, steps: localBatch.steps.filter(s => s.id !== el.dataset.removeStep) };
       setDirty(true);
       render();
+    });
+  });
+
+  // ── Ingredient refs: link select ──
+  document.querySelectorAll(".step-ing-link-select").forEach(el => {
+    el.addEventListener("change", () => {
+      if (!localBatch) return;
+      const stepId = el.dataset.linkStep;
+      const ingId  = el.value;
+      if (!ingId) return;
+      el.value = ""; // reset select
+      localBatch = {
+        ...localBatch,
+        steps: localBatch.steps.map(s =>
+          s.id === stepId
+            ? { ...s, ingredientRefs: [...(s.ingredientRefs ?? []), { ingId, note: "" }] }
+            : s
+        ),
+      };
+      setDirty(true);
+      render();
+    });
+  });
+
+  // ── Ingredient refs: unlink button ──
+  document.querySelectorAll("[data-unlink-step]").forEach(el => {
+    el.addEventListener("click", () => {
+      if (!localBatch) return;
+      const stepId = el.dataset.unlinkStep;
+      const ingId  = el.dataset.unlinkIng;
+      localBatch = {
+        ...localBatch,
+        steps: localBatch.steps.map(s =>
+          s.id === stepId
+            ? { ...s, ingredientRefs: (s.ingredientRefs ?? []).filter(r => r.ingId !== ingId) }
+            : s
+        ),
+      };
+      setDirty(true);
+      render();
+    });
+  });
+
+  // ── Ingredient refs: note input (no re-render) ──
+  document.querySelectorAll("[data-ref-note-step]").forEach(el => {
+    el.addEventListener("input", () => {
+      if (!localBatch) return;
+      const stepId = el.dataset.refNoteStep;
+      const ingId  = el.dataset.refNoteIng;
+      localBatch = {
+        ...localBatch,
+        steps: localBatch.steps.map(s =>
+          s.id === stepId
+            ? { ...s, ingredientRefs: (s.ingredientRefs ?? []).map(r => r.ingId === ingId ? { ...r, note: el.value } : r) }
+            : s
+        ),
+      };
+      setDirty(true);
     });
   });
 
@@ -794,15 +1084,67 @@ function on(id, handler, event = "click") {
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
-function createNewBatch() {
-  const batch = {
-    ...EMPTY_BATCH,
-    id:        newId(),
-    name:      "New batch",
-    style:     "Mead",
-    status:    STATUS.FERMENTING,
-    startDate: new Date().toISOString().slice(0, 10),
-  };
+function createNewBatch(type = "blank") {
+  let batch;
+
+  if (type.startsWith("custom:")) {
+    // User-created template stored as a batch with isTemplate: true
+    const sourceId = type.slice(7);
+    const source   = state.batches.find(b => b.id === sourceId);
+    batch = source ? {
+      ...source,
+      id:          newId(),
+      name:        source.name,
+      isTemplate:  false,
+      status:      STATUS.FERMENTING,
+      startDate:   new Date().toISOString().slice(0, 10),
+      gravityLog:  [],
+      tastingNotes:[],
+      processLog:  [],
+      ingredients: source.ingredients.map(i => ({ ...i, id: newId() })),
+      steps:       source.steps.map((s, i) => ({ ...s, id: newId(), order: i, completed: false, completedAt: null })),
+    } : { ...EMPTY_BATCH, id: newId(), name: "New batch", style: "Mead", status: STATUS.FERMENTING, startDate: new Date().toISOString().slice(0, 10) };
+  } else {
+    const template = type !== "blank" ? TEMPLATES[type] : null;
+    batch = template ? {
+      ...EMPTY_BATCH,
+      id:        newId(),
+      name:      `New ${type}`,
+      style:     template.style,
+      status:    STATUS.FERMENTING,
+      startDate: new Date().toISOString().slice(0, 10),
+      batchSize: template.batchSize,
+      targetABV: template.targetABV,
+      notes:     template.notes,
+      ingredients: template.ingredients.map(ing => ({
+        id:     newId(),
+        name:   ing.name,
+        amount: ing.amount,
+        unit:   ing.unit   || "",
+        note:   ing.note   || "",
+      })),
+      steps: template.steps.map((step, i) => ({
+        id:             newId(),
+        order:          i,
+        name:           step.text,
+        description:    step.note || "",
+        ingredientRefs: [],
+        completed:      false,
+        completedAt:    null,
+      })),
+      gravityLog:   [],
+      tastingNotes: [],
+      processLog:   [],
+    } : {
+      ...EMPTY_BATCH,
+      id:        newId(),
+      name:      "New batch",
+      style:     "Mead",
+      status:    STATUS.FERMENTING,
+      startDate: new Date().toISOString().slice(0, 10),
+    };
+  }
+
   const batches = saveBatch(batch, state.batches);
   setState({ batches, activeBatchId: batch.id, activeTab: "recipe" });
 }
