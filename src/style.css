@@ -373,6 +373,12 @@ body {
   flex-direction: column;
   gap: 1rem;
 }
+
+.modal-browser {
+  width: min(640px, calc(100vw - 2rem));
+  max-height: min(520px, 90vh);
+  overflow: hidden;
+}
 .modal-title { font-size: 16px; font-weight: normal; margin: 0; }
 .modal-label {
   display: flex;
@@ -624,6 +630,84 @@ body {
   .tabs { overflow-x: auto; }
   .tab { white-space: nowrap; }
 }
+
+/* ── Template browser (new-batch modal) ──────────────────────────────────── */
+.tmpl-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+  margin: -0.25rem -1.5rem 0;
+  padding: 0 1.5rem;
+}
+
+.tmpl-tab {
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  margin-bottom: -1px;
+  flex-shrink: 0;
+}
+.tmpl-tab:hover { color: var(--text); }
+.tmpl-tab-active { color: var(--text); border-bottom-color: var(--accent); }
+
+.tmpl-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  padding: 12px 0 4px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 180px;
+  max-height: 300px;
+}
+
+.tmpl-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.tmpl-card:hover { border-color: var(--accent); }
+.tmpl-card-active { border-color: var(--accent); background: var(--accent-lt); }
+
+.tmpl-card-name { font-size: 14px; line-height: 1.4; }
+.tmpl-card-meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 5px;
+  line-height: 1.4;
+}
+
+/* ── Sync section (list view) ────────────────────────────────────────────── */
+.sync-section { margin-bottom: 1.5rem; }
+.sync-heading { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+.sync-desc { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; max-width: 56ch; }
+
+.sync-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.sync-status { font-size: 13px; }
+.sync-strip-actions { display: flex; gap: 6px; }
+
+.tmpl-card-saved { border-style: dashed; }
 
 /* TODO: styles pass — current aesthetic is functional/prototype level.
    Planned: typography scale refinement, spacing rhythm, card polish,

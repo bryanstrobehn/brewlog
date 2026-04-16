@@ -188,3 +188,72 @@ export async function deleteImage(batchId) {
     tx.onerror    = e => reject(e.target.error);
   });
 }
+
+// ─── Sync folder (File System Access API) ────────────────────────────────────
+// Stores a FileSystemDirectoryHandle in IndexedDB so the user only picks once.
+// Push writes brewlog-sync.json to the folder; Pull reads it back.
+// Note: requires Chrome/Edge — showDirectoryPicker is not in Firefox/Safari.
+
+const SYNC_DB_NAME    = "brewlog_sync";
+const SYNC_DB_VERSION = 1;
+const SYNC_STORE_NAME = "handles";
+const SYNC_FILE_NAME  = "brewlog-sync.json";
+
+function openSyncDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SYNC_DB_NAME, SYNC_DB_VERSION);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(SYNC_STORE_NAME);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+export async function saveSyncHandle(handle) {
+  const db = await openSyncDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SYNC_STORE_NAME, "readwrite");
+    tx.objectStore(SYNC_STORE_NAME).put(handle, "dir");
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+export async function loadSyncHandle() {
+  const db = await openSyncDB();
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction(SYNC_STORE_NAME, "readonly");
+    const req = tx.objectStore(SYNC_STORE_NAME).get("dir");
+    req.onsuccess = e => resolve(e.target.result ?? null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function getSyncDir() {
+  const handle = await loadSyncHandle();
+  if (!handle) throw new Error("No sync folder connected.");
+  const permission = await handle.requestPermission({ mode: "readwrite" });
+  if (permission !== "granted") throw new Error("Permission denied for sync folder.");
+  return handle;
+}
+
+export async function pushToSyncFile(batches) {
+  const dir      = await getSyncDir();
+  const file     = await dir.getFileHandle(SYNC_FILE_NAME, { create: true });
+  const writable = await file.createWritable();
+  await writable.write(JSON.stringify({ version: 1, exported: new Date().toISOString(), batches }, null, 2));
+  await writable.close();
+}
+
+export async function pullFromSyncFile() {
+  const dir = await getSyncDir();
+  try {
+    const file = await dir.getFileHandle(SYNC_FILE_NAME);
+    const f    = await file.getFile();
+    const text = await f.text();
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : data.batches ?? [];
+  } catch (e) {
+    if (e.name === "NotFoundError") return null; // file not pushed yet
+    throw e;
+  }
+}

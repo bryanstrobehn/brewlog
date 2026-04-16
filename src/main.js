@@ -4,6 +4,7 @@ import {
   exportAll, importAll, exportBatch,
   batchToShareUrl, batchFromShareUrl,
   saveImage, loadAllImages, deleteImage,
+  saveSyncHandle, loadSyncHandle, pushToSyncFile, pullFromSyncFile,
   EMPTY_BATCH, STATUS
 } from "./data.js";
 import TEMPLATES, { TEMPLATE_GROUPS, ALL_TYPES } from "./templates.js";
@@ -19,14 +20,20 @@ let state = {
 // localBatch: working copy of the active batch; unsaved edits live here only.
 // dirty: true when localBatch has changes not yet written to localStorage.
 // imageCache: batchId → dataUrl, populated from IndexedDB on boot.
-let localBatch          = null;
-let dirty               = false;
-let imageCache          = new Map();
+let localBatch           = null;
+let dirty                = false;
+let imageCache           = new Map();
 let ingredientsCollapsed = false;
-let dragIngId           = null; // ingredient ID being dragged
+let dragIngId            = null; // ingredient ID being dragged
+let modalCategory        = "Blank";
+let modalSelected        = "blank";
+let syncFolderName       = null;
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
-loadAllImages().then(map => { imageCache = map; render(); }).catch(() => render());
+Promise.all([
+  loadAllImages().then(map => { imageCache = map; }).catch(() => {}),
+  loadSyncHandle().then(h => { syncFolderName = h?.name ?? null; }).catch(() => {}),
+]).finally(() => render());
 
 // ─── Share link on load ───────────────────────────────────────────────────────
 const shared = batchFromShareUrl();
@@ -155,28 +162,18 @@ function resizeImage(dataUrl, maxDim = 900) {
 // ─── New-batch modal ──────────────────────────────────────────────────────────
 function renderNewBatchModal() {
   const customTemplates = state.batches.filter(b => b.isTemplate);
-  const customGroup = customTemplates.length ? `
-    <optgroup label="My Templates">
-      ${customTemplates.map(b => `<option value="custom:${b.id}">${b.name}</option>`).join("")}
-    </optgroup>
-  ` : "";
-  const builtinGroups = TEMPLATE_GROUPS.map(g => `
-    <optgroup label="${g.group}">
-      ${g.types.map(t => `<option value="${t}">${t}</option>`).join("")}
-    </optgroup>
-  `).join("");
+  const ungrouped = customTemplates.filter(b => getCustomTemplateGroup(b) === null);
+  const cats = ["Blank", ...TEMPLATE_GROUPS.map(g => g.group), ...(ungrouped.length ? ["My Templates"] : [])];
   return `
     <div class="modal-backdrop" id="modal-backdrop">
-      <div class="modal">
+      <div class="modal modal-browser">
         <h2 class="modal-title">New batch</h2>
-        <label class="modal-label">
-          Start from a template
-          <select class="input" id="template-select">
-            <option value="blank">— Start from scratch —</option>
-            ${customGroup}
-            ${builtinGroups}
-          </select>
-        </label>
+        <div class="tmpl-tabs">
+          ${cats.map(c => `<button class="tmpl-tab${c === modalCategory ? " tmpl-tab-active" : ""}" data-cat="${c}">${c}</button>`).join("")}
+        </div>
+        <div class="tmpl-cards" id="tmpl-cards">
+          ${renderModalCards(modalCategory)}
+        </div>
         <div class="modal-actions">
           <button class="btn" id="btn-modal-cancel">Cancel</button>
           <button class="btn btn-primary" id="btn-modal-create">Create batch</button>
@@ -184,6 +181,80 @@ function renderNewBatchModal() {
       </div>
     </div>
   `;
+}
+
+function getCustomTemplateGroup(batch) {
+  for (const g of TEMPLATE_GROUPS) {
+    if (g.types.includes(batch.style)) return g.group;
+  }
+  return null;
+}
+
+function renderModalCards(category) {
+  const customTemplates = state.batches.filter(b => b.isTemplate);
+
+  if (category === "Blank") {
+    return `
+      <div class="tmpl-card ${modalSelected === "blank" ? "tmpl-card-active" : ""}" data-tval="blank">
+        <div class="tmpl-card-name">Start from scratch</div>
+        <div class="tmpl-card-meta">No ingredients or steps pre-loaded</div>
+      </div>
+    `;
+  }
+
+  if (category === "My Templates") {
+    const ungrouped = customTemplates.filter(b => getCustomTemplateGroup(b) === null);
+    if (!ungrouped.length) return `<p class="empty-hint">No saved templates yet.</p>`;
+    return ungrouped.map(b => {
+      const tval = `custom:${b.id}`;
+      return `
+        <div class="tmpl-card ${modalSelected === tval ? "tmpl-card-active" : ""}" data-tval="${tval}">
+          <div class="tmpl-card-name">${b.name}</div>
+          <div class="tmpl-card-meta">${b.style}${b.batchSize ? ` · ${b.batchSize}` : ""}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  const group = TEMPLATE_GROUPS.find(g => g.group === category);
+  if (!group) return "";
+
+  const builtins = group.types.map(t => {
+    const tmpl = TEMPLATES[t];
+    const meta = [
+      tmpl?.batchSize,
+      tmpl?.targetABV,
+      tmpl?.ingredients?.length ? `${tmpl.ingredients.length} ingr.` : null,
+    ].filter(Boolean).join(" · ");
+    return `
+      <div class="tmpl-card ${modalSelected === t ? "tmpl-card-active" : ""}" data-tval="${t}">
+        <div class="tmpl-card-name">${t}</div>
+        ${meta ? `<div class="tmpl-card-meta">${meta}</div>` : ""}
+      </div>
+    `;
+  }).join("");
+
+  const mine = customTemplates.filter(b => getCustomTemplateGroup(b) === category).map(b => {
+    const tval = `custom:${b.id}`;
+    return `
+      <div class="tmpl-card tmpl-card-saved ${modalSelected === tval ? "tmpl-card-active" : ""}" data-tval="${tval}">
+        <div class="tmpl-card-name">${b.name}</div>
+        <div class="tmpl-card-meta">My template${b.batchSize ? ` · ${b.batchSize}` : ""}</div>
+      </div>
+    `;
+  }).join("");
+
+  return builtins + mine;
+}
+
+function bindModalCardEvents() {
+  document.querySelectorAll(".tmpl-card").forEach(card => {
+    card.addEventListener("click", () => {
+      modalSelected = card.dataset.tval;
+      document.querySelectorAll(".tmpl-card").forEach(c => c.classList.remove("tmpl-card-active"));
+      card.classList.add("tmpl-card-active");
+    });
+  });
 }
 
 // ─── List view ────────────────────────────────────────────────────────────────
@@ -203,6 +274,25 @@ function renderListView() {
 
       <main class="list-main">
         <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes. Your data stays on your device; nothing is sent anywhere.</p>
+
+        ${window.showDirectoryPicker ? `
+          <div class="sync-section">
+            <h3 class="sync-heading">Single-user sync</h3>
+            <p class="sync-desc">Point Brewlog at a shared folder — OneDrive, Dropbox, iCloud, whatever — and use Push/Pull to move your data between your phone and desktop. No account needed; you control the file. <strong>Current logic is "pull wins" — if you push from multiple devices without first pulling, you may lose data.</strong></p>
+            <div class="sync-strip">
+              ${syncFolderName
+                ? `<span class="sync-status">Folder: <strong>${syncFolderName}</strong></span>
+                   <div class="sync-strip-actions">
+                     <button class="btn" id="btn-sync-pull">↓ Pull</button>
+                     <button class="btn" id="btn-sync-push">↑ Push</button>
+                     <button class="btn" id="btn-sync-connect">Change</button>
+                   </div>`
+                : `<span class="muted" style="font-size:13px">No folder connected</span>
+                   <button class="btn" id="btn-sync-connect">Connect folder…</button>`
+              }
+            </div>
+          </div>
+        ` : ""}
 
         ${regular.length === 0 ? `
           <div class="empty-state">
@@ -230,19 +320,42 @@ function renderListView() {
 }
 
 function showNewBatchModal() {
-  // Append modal to body so it overlays everything
+  modalCategory = "Blank";
+  modalSelected = "blank";
+
   const el = document.createElement("div");
   el.innerHTML = renderNewBatchModal();
   document.body.appendChild(el.firstElementChild);
+
+  bindModalCardEvents();
 
   document.getElementById("btn-modal-cancel")?.addEventListener("click", closeNewBatchModal);
   document.getElementById("modal-backdrop")?.addEventListener("click", (e) => {
     if (e.target.id === "modal-backdrop") closeNewBatchModal();
   });
   document.getElementById("btn-modal-create")?.addEventListener("click", () => {
-    const type = document.getElementById("template-select")?.value ?? "blank";
     closeNewBatchModal();
-    createNewBatch(type);
+    createNewBatch(modalSelected);
+  });
+
+  document.querySelectorAll(".tmpl-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      modalCategory = tab.dataset.cat;
+      if (modalCategory === "Blank") {
+        modalSelected = "blank";
+      } else if (modalCategory === "My Templates") {
+        const first = state.batches.filter(b => b.isTemplate).find(b => getCustomTemplateGroup(b) === null);
+        modalSelected = first ? `custom:${first.id}` : "blank";
+      } else {
+        const group = TEMPLATE_GROUPS.find(g => g.group === modalCategory);
+        const firstMine = state.batches.filter(b => b.isTemplate).find(b => getCustomTemplateGroup(b) === modalCategory);
+        modalSelected = group?.types[0] ?? (firstMine ? `custom:${firstMine.id}` : "blank");
+      }
+      document.querySelectorAll(".tmpl-tab").forEach(t => t.classList.remove("tmpl-tab-active"));
+      tab.classList.add("tmpl-tab-active");
+      document.getElementById("tmpl-cards").innerHTML = renderModalCards(modalCategory);
+      bindModalCardEvents();
+    });
   });
 }
 
@@ -668,6 +781,47 @@ function bindEvents() {
   on("btn-export-full", () => exportAll(state.batches));
   on("btn-import-full", () => document.getElementById("file-import")?.click());
   on("file-import",     (e) => handleFileImport(e), "change");
+
+  // ── Sync folder ──
+  on("btn-sync-connect", async () => {
+    if (!window.showDirectoryPicker) { alert("File system sync requires Chrome or Edge."); return; }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      await saveSyncHandle(handle);
+      syncFolderName = handle.name;
+      render();
+    } catch (e) {
+      if (e.name !== "AbortError") alert("Could not connect folder: " + e.message);
+    }
+  });
+
+  on("btn-sync-push", async () => {
+    const btn = document.getElementById("btn-sync-push");
+    try {
+      await pushToSyncFile(state.batches);
+      if (btn) { const orig = btn.textContent; btn.textContent = "↑ Pushed!"; setTimeout(() => { btn.textContent = orig; }, 2000); }
+    } catch (e) {
+      alert("Push failed: " + e.message);
+    }
+  });
+
+  on("btn-sync-pull", async () => {
+    const btn = document.getElementById("btn-sync-pull");
+    try {
+      const imported = await pullFromSyncFile();
+      if (!imported) { alert("No sync file found yet. Push from another device first."); return; }
+      const merged = [...state.batches];
+      imported.forEach(b => {
+        const idx = merged.findIndex(x => x.id === b.id);
+        if (idx >= 0) merged[idx] = b; else merged.push(b);
+      });
+      saveAll(merged);
+      setState({ batches: merged });
+      if (btn) { const orig = btn.textContent; btn.textContent = "↓ Pulled!"; setTimeout(() => { btn.textContent = orig; }, 2000); }
+    } catch (e) {
+      alert("Pull failed: " + e.message);
+    }
+  });
 
   document.querySelectorAll(".batch-card[data-id]").forEach(el => {
     el.addEventListener("click", () => setState({ activeBatchId: el.dataset.id, activeTab: "recipe" }));
@@ -1173,8 +1327,19 @@ function handleFileImport(e) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     try {
-      const imported = importAll(ev.target.result);
-      const merged   = [...state.batches];
+      const parsed = JSON.parse(ev.target.result);
+      // Support both full backup { batches: [...] } and single-batch { batch: {...} }
+      let imported;
+      if (Array.isArray(parsed)) {
+        imported = parsed;
+      } else if (parsed.batches) {
+        imported = parsed.batches;
+      } else if (parsed.batch) {
+        imported = [parsed.batch];
+      } else {
+        imported = [];
+      }
+      const merged = [...state.batches];
       imported.forEach(b => { if (!merged.find(x => x.id === b.id)) merged.push(b); });
       saveAll(merged);
       setState({ batches: merged });
