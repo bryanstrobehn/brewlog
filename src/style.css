@@ -689,7 +689,9 @@ body {
 
 /* ── Sync section (list view) ────────────────────────────────────────────── */
 .sync-section { margin-bottom: 1.5rem; }
-.sync-heading { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+.sync-heading,
+.section-heading { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+.section-heading { margin-bottom: 12px; }
 .sync-desc { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; max-width: 56ch; }
 
 .sync-strip {

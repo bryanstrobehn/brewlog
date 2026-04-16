@@ -278,7 +278,7 @@ function renderListView() {
         ${window.showDirectoryPicker ? `
           <div class="sync-section">
             <h3 class="sync-heading">Single-user sync</h3>
-            <p class="sync-desc">Point Brewlog at a shared folder — OneDrive, Dropbox, iCloud, whatever — and use Push/Pull to move your data between your phone and desktop. No account needed; you control the file. <strong>Current logic is "pull wins" — if you push from multiple devices without first pulling, you may lose data.</strong></p>
+            <p class="sync-desc">Desktop-to-desktop sync via a shared folder (OneDrive, Dropbox, etc.). Connect a folder once, then Push to write your data and Pull to load it on another desktop. <strong>Pull wins — always pull before pushing from a second machine or you'll overwrite data.</strong> On mobile, use Export JSON + Import backup instead.</p>
             <div class="sync-strip">
               ${syncFolderName
                 ? `<span class="sync-status">Folder: <strong>${syncFolderName}</strong></span>
@@ -293,6 +293,8 @@ function renderListView() {
             </div>
           </div>
         ` : ""}
+
+        <h3 class="section-heading">Recipes</h3>
 
         ${regular.length === 0 ? `
           <div class="empty-state">
