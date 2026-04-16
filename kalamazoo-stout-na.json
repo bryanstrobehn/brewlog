@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "exported": "2026-04-15T00:00:00.000Z",
+  "batch": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Kalamazoo Stout Clone (NA)",
+    "style": "Stout",
+    "status": "Planning",
+    "batchSize": "~2 oz additive bottle",
+    "startDate": "2026-04-15",
+    "targetABV": "NA",
+    "notes": "Attempting to replicate Bell's Kalamazoo Stout using Athletic Brewing Dark as the base. The additive bottle goes into the fridge; dose per glass to taste starting at 1 tsp per can.",
+    "ingredients": [
+      { "id": "i1", "name": "Ritual NA Gin (star anise infused)", "amount": "1", "unit": "oz" },
+      { "id": "i2", "name": "Angostura Bitters", "amount": "0.5", "unit": "oz" },
+      { "id": "i3", "name": "Chocolate Bitters", "amount": "0.25", "unit": "oz" },
+      { "id": "i4", "name": "Vanilla Extract", "amount": "0.25", "unit": "tsp" },
+      { "id": "i5", "name": "Star Anise (steep only, remove before bottling)", "amount": "3-4", "unit": "whole" },
+      { "id": "i6", "name": "Athletic Brewing Dark (base, per glass)", "amount": "1", "unit": "can" },
+      { "id": "i7", "name": "Cocoa Powder (fresh per glass)", "amount": "pinch", "unit": "" },
+      { "id": "i8", "name": "Red Pepper Flakes (fresh per glass)", "amount": "1-2", "unit": "flakes" },
+      { "id": "i9", "name": "Cold Brew or Espresso (optional, fresh per glass)", "amount": "1 drop", "unit": "" }
+    ],
+    "steps": [
+      {
+        "id": "s1",
+        "order": 1,
+        "name": "Steep star anise in gin",
+        "description": "Add 3-4 star anise to 1 oz Ritual NA gin. Steep overnight.",
+        "completed": false,
+        "completedAt": null
+      },
+      {
+        "id": "s2",
+        "order": 2,
+        "name": "Strain and build bottle mix",
+        "description": "Strain out star anise. Combine in a small bottle: 1 oz infused gin, ½ oz Angostura bitters, ¼ oz chocolate bitters, ¼ tsp vanilla extract. Shake.",
+        "completed": false,
+        "completedAt": null
+      },
+      {
+        "id": "s3",
+        "order": 3,
+        "name": "Refrigerate",
+        "description": "Store the ~2 oz additive bottle in the fridge.",
+        "completed": false,
+        "completedAt": null
+      },
+      {
+        "id": "s4",
+        "order": 4,
+        "name": "Serve and dial in dose",
+        "description": "Open an Athletic Dark. Start with 1 tsp of bottle mix, add a pinch of cocoa powder, 1-2 red pepper flakes, and optional drop of cold brew or espresso. Taste and dose up from there.",
+        "completed": false,
+        "completedAt": null
+      }
+    ],
+    "gravityLog": [],
+    "tastingNotes": [],
+    "processLog": []
+  }
+}

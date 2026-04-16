@@ -40,10 +40,25 @@ body {
 }
 
 .wordmark {
-  font-size: 18px;
-  font-weight: normal;
-  letter-spacing: 0.04em;
+  font-size: 20px;
+  letter-spacing: 0.02em;
   color: var(--text);
+  user-select: none;
+}
+.wordmark-brew {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.wordmark-dot {
+  color: var(--accent);
+  font-weight: 700;
+}
+.wordmark-log {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: normal;
+  color: var(--muted);
+  letter-spacing: 0;
 }
 
 .batch-wordmark {
@@ -694,6 +709,21 @@ body {
 .section-heading { margin-bottom: 12px; }
 .sync-desc { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; max-width: 56ch; }
 
+.sync-data-heading {
+  font-size: 22px;
+  font-weight: normal;
+  margin: 2.5rem 0 0.25rem;
+  letter-spacing: 0.01em;
+}
+.sync-sub-heading {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 1.75rem 0 0.5rem;
+}
+
 .sync-strip {
   display: flex;
   align-items: center;
@@ -708,6 +738,51 @@ body {
 }
 .sync-status { font-size: 13px; }
 .sync-strip-actions { display: flex; gap: 6px; }
+
+.sync-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--bg);
+}
+.sync-settings-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sync-settings-row input { flex: 1; min-width: 0; }
+
+.btn-ghost {
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+.btn-ghost:hover { color: var(--text); background: none; }
+
+.btn-danger-outline {
+  background: none;
+  border-color: var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+}
+.btn-danger-outline:hover { background: var(--danger); color: #fff; }
+
+.btn-show-all {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: 1px dashed var(--border);
+}
+.btn-show-all:hover { color: var(--text); border-color: var(--muted); }
 
 .tmpl-card-saved { border-style: dashed; }
 

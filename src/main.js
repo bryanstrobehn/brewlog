@@ -5,6 +5,8 @@ import {
   batchToShareUrl, batchFromShareUrl,
   saveImage, loadAllImages, deleteImage,
   saveSyncHandle, loadSyncHandle, pushToSyncFile, pullFromSyncFile,
+  loadCloudConfig, saveCloudConfig, clearCloudConfig,
+  cloudPush, cloudPull, backupLocal, loadLocalBackup,
   EMPTY_BATCH, STATUS
 } from "./data.js";
 import TEMPLATES, { TEMPLATE_GROUPS, ALL_TYPES } from "./templates.js";
@@ -27,7 +29,17 @@ let ingredientsCollapsed = false;
 let dragIngId            = null; // ingredient ID being dragged
 let modalCategory        = "Blank";
 let modalSelected        = "blank";
-let syncFolderName       = null;
+let syncFolderName        = null;
+let cloudConfig           = loadCloudConfig(); // { vault } or null
+let cloudSettingsExpanded = false;
+let showAllBatches        = false;
+
+// ─── Sync feature flag ────────────────────────────────────────────────────────
+// Visit with ?sync=1 once per device to permanently enable sync UI via localStorage.
+if (new URLSearchParams(location.search).get("sync") === "1") {
+  localStorage.setItem("brewlog_sync_ff", "1");
+}
+const SYNC_ENABLED = localStorage.getItem("brewlog_sync_ff") === "1";
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 Promise.all([
@@ -261,24 +273,83 @@ function bindModalCardEvents() {
 function renderListView() {
   const regular   = state.batches.filter(b => !b.isTemplate);
   const templates = state.batches.filter(b => b.isTemplate);
+  const BATCH_CAP = 4;
+  const visibleBatches = showAllBatches ? regular : regular.slice(0, BATCH_CAP);
+  const hiddenCount    = regular.length - BATCH_CAP;
+
   return `
     <div class="layout">
       <header class="topbar">
-        <span class="wordmark">Brewlog</span>
+        <span class="wordmark"><span class="wordmark-brew">BREW</span><span class="wordmark-dot">.</span><span class="wordmark-log">log</span></span>
         <div class="topbar-actions">
-          <button class="btn" id="btn-import-full">Import backup</button>
-          <button class="btn" id="btn-export-full">Export JSON</button>
           <button class="btn btn-primary" id="btn-new">+ New batch</button>
         </div>
       </header>
 
       <main class="list-main">
-        <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes. Your data stays on your device; nothing is sent anywhere.</p>
+        <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes.</p>
 
-        ${window.showDirectoryPicker ? `
+        <h3 class="section-heading">Recipes</h3>
+
+        ${regular.length === 0 ? `
+          <div class="empty-state">
+            <p>No batches yet.</p>
+            <button class="btn btn-primary" id="btn-new-empty">Add your first batch</button>
+          </div>
+        ` : `
+          <div class="batch-grid">
+            ${visibleBatches.map(renderBatchCard).join("")}
+          </div>
+          ${!showAllBatches && hiddenCount > 0 ? `
+            <button class="btn btn-show-all" id="btn-show-all-batches">Show all (${hiddenCount} more)</button>
+          ` : hiddenCount > 0 ? `
+            <button class="btn btn-show-all" id="btn-show-all-batches">Show fewer</button>
+          ` : ""}
+        `}
+
+        ${templates.length ? `
+          <div class="templates-section">
+            <span class="section-label">My Templates</span>
+            <div class="batch-grid">
+              ${templates.map(renderBatchCard).join("")}
+            </div>
+          </div>
+        ` : ""}
+
+        ${SYNC_ENABLED ? `
+        <h1 class="sync-data-heading">Sync Data</h1>
+        <h2 class="sync-sub-heading">Cloudflare &lt;&gt; Syncer</h2>
+
+        <div class="sync-section">
+          <p class="sync-desc">Keep your brews in sync across all your devices — phone, tablet, desktop. Choose a vault passphrase once and use it on every device. Your data is end-to-end safe: the passphrase is hashed before leaving your device and never stored.</p>
+          <div class="sync-strip">
+            ${cloudConfig
+              ? `<span class="sync-status">Vault connected</span>
+                 <div class="sync-strip-actions">
+                   <button class="btn" id="btn-cloud-pull">↓ Pull</button>
+                   <button class="btn" id="btn-cloud-push">↑ Push</button>
+                   <button class="btn btn-ghost" id="btn-cloud-settings">${cloudSettingsExpanded ? "Settings ▲" : "Settings ▾"}</button>
+                 </div>`
+              : `<input id="cloud-vault-input" type="password" autocomplete="new-password" placeholder="Choose a vault passphrase" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:3px;flex:1;min-width:0" />
+                 <button class="btn btn-primary" id="btn-cloud-connect">Connect</button>`
+            }
+          </div>
+          ${cloudConfig && cloudSettingsExpanded ? `
+            <div class="sync-settings-panel">
+              <div class="sync-settings-row">
+                <input id="cloud-vault-update-input" type="password" autocomplete="new-password" placeholder="New passphrase" style="font-size:13px;padding:4px 8px;border:1px solid var(--border);border-radius:3px;flex:1;min-width:0" />
+                <button class="btn" id="btn-cloud-update">Update passphrase</button>
+              </div>
+              <button class="btn btn-danger-outline" id="btn-cloud-disconnect">Disconnect</button>
+            </div>
+          ` : ""}
+        </div>
+        ` : ""}
+
+        ${SYNC_ENABLED && window.showDirectoryPicker ? `
+          <h2 class="sync-sub-heading">Desktop folder sync</h2>
           <div class="sync-section">
-            <h3 class="sync-heading">Single-user sync</h3>
-            <p class="sync-desc">Desktop-to-desktop sync via a shared folder (OneDrive, Dropbox, etc.). Connect a folder once, then Push to write your data and Pull to load it on another desktop. <strong>Pull wins — always pull before pushing from a second machine or you'll overwrite data.</strong> On mobile, use Export JSON + Import backup instead.</p>
+            <p class="sync-desc">Sync between desktops via a shared folder (OneDrive, Dropbox, etc.). Not available on mobile.</p>
             <div class="sync-strip">
               ${syncFolderName
                 ? `<span class="sync-status">Folder: <strong>${syncFolderName}</strong></span>
@@ -294,27 +365,17 @@ function renderListView() {
           </div>
         ` : ""}
 
-        <h3 class="section-heading">Recipes</h3>
-
-        ${regular.length === 0 ? `
-          <div class="empty-state">
-            <p>No batches yet.</p>
-            <button class="btn btn-primary" id="btn-new-empty">Add your first batch</button>
+        ${SYNC_ENABLED ? `
+        <h2 class="sync-sub-heading">Manual sync</h2>
+        <div class="sync-section">
+          <p class="sync-desc">Export a full JSON backup to your device, or import one to restore. Useful for one-off transfers or keeping an offline backup.</p>
+          <div class="sync-strip">
+            <button class="btn" id="btn-export-full">Export JSON</button>
+            <button class="btn" id="btn-import-full">Import backup</button>
           </div>
-        ` : `
-          <div class="batch-grid">
-            ${regular.map(renderBatchCard).join("")}
-          </div>
-        `}
-
-        ${templates.length ? `
-          <div class="templates-section">
-            <span class="section-label">My Templates</span>
-            <div class="batch-grid">
-              ${templates.map(renderBatchCard).join("")}
-            </div>
-          </div>
+        </div>
         ` : ""}
+
       </main>
     </div>
     <input type="file" id="file-import" accept=".json" style="display:none" />
@@ -778,11 +839,12 @@ let selectedAttrs = [];
 
 function bindEvents() {
   // ── List view ──
-  on("btn-new",         () => showNewBatchModal());
-  on("btn-new-empty",   () => showNewBatchModal());
-  on("btn-export-full", () => exportAll(state.batches));
-  on("btn-import-full", () => document.getElementById("file-import")?.click());
-  on("file-import",     (e) => handleFileImport(e), "change");
+  on("btn-new",              () => showNewBatchModal());
+  on("btn-new-empty",        () => showNewBatchModal());
+  on("btn-export-full",      () => exportAll(state.batches));
+  on("btn-import-full",      () => document.getElementById("file-import")?.click());
+  on("file-import",          (e) => handleFileImport(e), "change");
+  on("btn-show-all-batches", () => { showAllBatches = !showAllBatches; render(); });
 
   // ── Sync folder ──
   on("btn-sync-connect", async () => {
@@ -821,6 +883,77 @@ function bindEvents() {
       setState({ batches: merged });
       if (btn) { const orig = btn.textContent; btn.textContent = "↓ Pulled!"; setTimeout(() => { btn.textContent = orig; }, 2000); }
     } catch (e) {
+      alert("Pull failed: " + e.message);
+    }
+  });
+
+  // ── Cloud sync ──
+  on("btn-cloud-connect", () => {
+    const input = document.getElementById("cloud-vault-input");
+    const vault = input?.value.trim();
+    if (!vault || vault.length < 4) { alert("Enter a passphrase (at least 4 characters)."); return; }
+    cloudConfig = { vault };
+    saveCloudConfig(cloudConfig);
+    cloudSettingsExpanded = false;
+    render();
+  });
+
+  on("btn-cloud-settings", () => {
+    cloudSettingsExpanded = !cloudSettingsExpanded;
+    render();
+  });
+
+  on("btn-cloud-update", () => {
+    const input = document.getElementById("cloud-vault-update-input");
+    const vault = input?.value.trim();
+    if (!vault || vault.length < 4) { alert("Enter a new passphrase (at least 4 characters)."); return; }
+    cloudConfig = { vault };
+    saveCloudConfig(cloudConfig);
+    cloudSettingsExpanded = false;
+    render();
+  });
+
+  on("btn-cloud-disconnect", () => {
+    if (!confirm("Disconnect cloud sync? Your local data is untouched.")) return;
+    cloudConfig = null;
+    cloudSettingsExpanded = false;
+    clearCloudConfig();
+    render();
+  });
+
+  on("btn-cloud-push", async () => {
+    const btn = document.getElementById("btn-cloud-push");
+    try {
+      if (btn) btn.textContent = "Pushing…";
+      const pushedAt = new Date().toISOString();
+      await cloudPush(state.batches, cloudConfig.vault);
+      localStorage.setItem("brewlog_cloud_last_push", JSON.stringify(pushedAt));
+      if (btn) { btn.textContent = "↑ Pushed!"; setTimeout(() => { btn.textContent = "↑ Push"; }, 2000); }
+    } catch (e) {
+      if (btn) btn.textContent = "↑ Push";
+      alert("Push failed: " + e.message);
+    }
+  });
+
+  on("btn-cloud-pull", async () => {
+    const btn = document.getElementById("btn-cloud-pull");
+    try {
+      if (btn) btn.textContent = "Pulling…";
+      const envelope = await cloudPull(cloudConfig.vault);
+      if (!envelope) { alert("Nothing in the cloud yet — push from another device first."); if (btn) btn.textContent = "↓ Pull"; return; }
+      const localUpdatedAt = (() => { try { return JSON.parse(localStorage.getItem("brewlog_cloud_last_push") ?? "null"); } catch { return null; } })();
+      if (localUpdatedAt && envelope.updatedAt <= localUpdatedAt) {
+        alert("Local data is already up to date (remote is not newer).");
+        if (btn) btn.textContent = "↓ Pull";
+        return;
+      }
+      backupLocal();
+      saveAll(envelope.data);
+      localStorage.setItem("brewlog_cloud_last_push", JSON.stringify(envelope.updatedAt));
+      setState({ batches: envelope.data });
+      if (btn) { btn.textContent = "↓ Pulled!"; setTimeout(() => { btn.textContent = "↓ Pull"; }, 2000); }
+    } catch (e) {
+      if (btn) btn.textContent = "↓ Pull";
       alert("Pull failed: " + e.message);
     }
   });

@@ -189,6 +189,57 @@ export async function deleteImage(batchId) {
   });
 }
 
+// ─── Cloud sync (Syncer backend) ─────────────────────────────────────────────
+
+const CLOUD_CONFIG_KEY = "brewlog_cloud_sync";
+const CLOUD_BACKUP_KEY = "brewlog_v1_backup";
+const CLOUD_ENDPOINT   = "https://syncer.bryanstrobehn.workers.dev";
+
+export function loadCloudConfig() {
+  try {
+    const raw = localStorage.getItem(CLOUD_CONFIG_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCloudConfig(config) {
+  localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
+}
+
+export function clearCloudConfig() {
+  localStorage.removeItem(CLOUD_CONFIG_KEY);
+}
+
+export async function cloudPush(batches, vault) {
+  const { SyncClient } = await import("./sync-client.js");
+  const client = new SyncClient({ endpoint: CLOUD_ENDPOINT, vault, app: "brewlog" });
+  await client.push({ data: batches, updatedAt: new Date().toISOString() });
+}
+
+export async function cloudPull(vault) {
+  const { SyncClient } = await import("./sync-client.js");
+  const client = new SyncClient({ endpoint: CLOUD_ENDPOINT, vault, app: "brewlog" });
+  const envelope = await client.pull();
+  if (!envelope) return null;
+  return envelope;  // { data, updatedAt }
+}
+
+export function backupLocal() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) localStorage.setItem(CLOUD_BACKUP_KEY, raw);
+}
+
+export function loadLocalBackup() {
+  try {
+    const raw = localStorage.getItem(CLOUD_BACKUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Sync folder (File System Access API) ────────────────────────────────────
 // Stores a FileSystemDirectoryHandle in IndexedDB so the user only picks once.
 // Push writes brewlog-sync.json to the folder; Pull reads it back.
