@@ -287,7 +287,7 @@ function renderListView() {
       </header>
 
       <main class="list-main">
-        <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes.</p>
+        <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes. Data is stored in local browser storage; use data sync options correctly to avoid losing data!</p>
 
         <h3 class="section-heading">Recipes</h3>
 
@@ -316,8 +316,9 @@ function renderListView() {
           </div>
         ` : ""}
 
-        ${SYNC_ENABLED ? `
         <h1 class="sync-data-heading">Sync Data</h1>
+
+        ${SYNC_ENABLED ? `
         <h2 class="sync-sub-heading">Cloudflare &lt;&gt; Syncer</h2>
 
         <div class="sync-section">
@@ -365,7 +366,6 @@ function renderListView() {
           </div>
         ` : ""}
 
-        ${SYNC_ENABLED ? `
         <h2 class="sync-sub-heading">Manual sync</h2>
         <div class="sync-section">
           <p class="sync-desc">Export a full JSON backup to your device, or import one to restore. Useful for one-off transfers or keeping an offline backup.</p>
@@ -374,7 +374,6 @@ function renderListView() {
             <button class="btn" id="btn-import-full">Import backup</button>
           </div>
         </div>
-        ` : ""}
 
       </main>
     </div>
