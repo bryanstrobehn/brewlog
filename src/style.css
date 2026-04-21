@@ -367,6 +367,12 @@ body {
   border-top: 2px solid var(--accent);
   margin-top: -1px;
 }
+.step-row-edit.dragging { opacity: 0.4; }
+.step-row-edit.drag-over {
+  border-top: 2px solid var(--accent);
+  margin-top: -1px;
+}
+.step-drag-handle { margin-top: 2px; }
 
 /* ── New-batch modal ─────────────────────────────────────────────────────── */
 .modal-backdrop {
@@ -464,6 +470,17 @@ body {
 }
 
 /* ── Steps ───────────────────────────────────────────────────────────────── */
+.step-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.step-section-header:first-child { border-top: none; margin-top: 0; }
 .step-row {
   display: flex;
   gap: 12px;
@@ -783,6 +800,22 @@ body {
   border: 1px dashed var(--border);
 }
 .btn-show-all:hover { color: var(--text); border-color: var(--muted); }
+
+.json-drop-zone {
+  margin-top: 12px;
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.json-drop-zone:hover, .json-drop-zone.drag-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .tmpl-card-saved { border-style: dashed; }
 

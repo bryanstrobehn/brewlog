@@ -27,6 +27,7 @@ let dirty                = false;
 let imageCache           = new Map();
 let ingredientsCollapsed = false;
 let dragIngId            = null; // ingredient ID being dragged
+let dragStepId           = null; // step ID being dragged
 let modalCategory        = "Blank";
 let modalSelected        = "blank";
 let syncFolderName        = null;
@@ -300,6 +301,7 @@ function renderListView() {
           <div class="batch-grid">
             ${visibleBatches.map(renderBatchCard).join("")}
           </div>
+          <div class="json-drop-zone" id="json-drop-zone">Drop a recipe or backup JSON here to import</div>
           ${!showAllBatches && hiddenCount > 0 ? `
             <button class="btn btn-show-all" id="btn-show-all-batches">Show all (${hiddenCount} more)</button>
           ` : hiddenCount > 0 ? `
@@ -549,7 +551,13 @@ function renderRecipeTab(batch) {
         ${editing ? `<p class="section-hint">Add steps below. Markdown is supported in descriptions.</p>` : ""}
         ${batch.steps.length === 0
           ? `<p class="empty-hint">No steps yet.</p>`
-          : batch.steps.map((step, i) => renderStepRow(step, i, editing, state.brewMode, batch.ingredients)).join("")
+          : batch.steps.map((step, i) => {
+              const prevSection = i > 0 ? batch.steps[i - 1].section : null;
+              const header = step.section && step.section !== prevSection
+                ? `<div class="step-section-header">${step.section}</div>`
+                : "";
+              return header + renderStepRow(step, i, editing, state.brewMode, batch.ingredients);
+            }).join("")
         }
         ${showDone ? `
           <div class="brew-done-banner">
@@ -697,9 +705,12 @@ function renderStepRow(step, idx, editing, brewMode, ingredients = []) {
     : "";
 
   return `
-    <div class="step-row" data-step-id="${step.id}">
+    <div class="step-row step-row-edit" data-step-id="${step.id}" draggable="true">
+      <span class="drag-handle step-drag-handle" title="Drag to reorder">⠿</span>
       <span class="step-num">${idx + 1}</span>
       <div class="step-body" style="flex:1">
+        <input class="input input-sm step-section-input" type="text" data-step-field="section"
+               value="${step.section || ""}" placeholder="Section label (optional, e.g. Fermentation)" style="width:100%;margin-bottom:4px;font-size:11px;opacity:0.7" />
         <input class="input input-sm" type="text" data-step-field="name"
                value="${step.name || ""}" placeholder="Step name" style="width:100%" />
         <textarea class="input input-sm textarea" data-step-field="description"
@@ -845,6 +856,21 @@ function bindEvents() {
   on("file-import",          (e) => handleFileImport(e), "change");
   on("btn-show-all-batches", () => { showAllBatches = !showAllBatches; render(); });
 
+  // ── JSON drop zone ──
+  const dropZone = document.getElementById("json-drop-zone");
+  if (dropZone) {
+    dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("drag-active"); });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-active"));
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("drag-active");
+      const file = e.dataTransfer.files?.[0];
+      if (!file || !file.name.endsWith(".json")) { alert("Please drop a .json file."); return; }
+      handleFileImport({ target: { files: [file], value: "" } });
+    });
+    dropZone.addEventListener("click", () => document.getElementById("file-import")?.click());
+  }
+
   // ── Sync folder ──
   on("btn-sync-connect", async () => {
     if (!window.showDirectoryPicker) { alert("File system sync requires Chrome or Edge."); return; }
@@ -859,6 +885,7 @@ function bindEvents() {
   });
 
   on("btn-sync-push", async () => {
+    if (!confirm("Push will overwrite the sync file with your local data. Any data on other devices that hasn't been pulled will be lost. Continue?")) return;
     const btn = document.getElementById("btn-sync-push");
     try {
       await pushToSyncFile(state.batches);
@@ -869,6 +896,7 @@ function bindEvents() {
   });
 
   on("btn-sync-pull", async () => {
+    if (!confirm("Pull will overwrite your local data with the sync file. Any unsaved local changes will be lost. Continue?")) return;
     const btn = document.getElementById("btn-sync-pull");
     try {
       const imported = await pullFromSyncFile();
@@ -921,6 +949,7 @@ function bindEvents() {
   });
 
   on("btn-cloud-push", async () => {
+    if (!confirm("Push will overwrite cloud data with your local data. Any data on other devices that hasn't been pulled will be lost. Continue?")) return;
     const btn = document.getElementById("btn-cloud-push");
     try {
       if (btn) btn.textContent = "Pushing…";
@@ -935,6 +964,7 @@ function bindEvents() {
   });
 
   on("btn-cloud-pull", async () => {
+    if (!confirm("Pull will overwrite your local data with cloud data. Any unsaved local changes will be lost. Continue?")) return;
     const btn = document.getElementById("btn-cloud-pull");
     try {
       if (btn) btn.textContent = "Pulling…";
@@ -1144,6 +1174,40 @@ function bindEvents() {
       const [moved] = ings.splice(fromIdx, 1);
       ings.splice(toIdx, 0, moved);
       localBatch = { ...localBatch, ingredients: ings };
+      setDirty(true);
+      render();
+    });
+  });
+
+  // ── Step drag-and-drop reorder ──
+  document.querySelectorAll("[data-step-id][draggable]").forEach(row => {
+    row.addEventListener("dragstart", (e) => {
+      dragStepId = row.dataset.stepId;
+      e.dataTransfer.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      dragStepId = null;
+      document.querySelectorAll(".step-row-edit").forEach(r => r.classList.remove("drag-over", "dragging"));
+    });
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (row.dataset.stepId !== dragStepId) row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("drag-over");
+      if (!localBatch || !dragStepId || dragStepId === row.dataset.stepId) return;
+      syncFormToLocalBatch();
+      const steps  = [...localBatch.steps];
+      const fromIdx = steps.findIndex(s => s.id === dragStepId);
+      const toIdx   = steps.findIndex(s => s.id === row.dataset.stepId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = steps.splice(fromIdx, 1);
+      steps.splice(toIdx, 0, moved);
+      localBatch = { ...localBatch, steps };
       setDirty(true);
       render();
     });
@@ -1470,16 +1534,33 @@ function handleFileImport(e) {
         imported = parsed.batches;
       } else if (parsed.batch) {
         imported = [parsed.batch];
+      } else if (parsed.id && parsed.name !== undefined) {
+        imported = [parsed]; // plain single-batch object
       } else {
-        imported = [];
+        alert("Could not recognize this JSON — expected a batch, backup, or array of batches.");
+        return;
+      }
+      if (!imported.every(b => b.id && b.name !== undefined)) {
+        alert("JSON appears malformed — one or more entries are missing required fields (id, name).");
+        return;
       }
       const merged = [...state.batches];
-      imported.forEach(b => { if (!merged.find(x => x.id === b.id)) merged.push(b); });
+      let added = 0, reassigned = 0;
+      imported.forEach(b => {
+        if (merged.find(x => x.id === b.id)) {
+          merged.push({ ...b, id: newId() });
+          reassigned++;
+        } else {
+          merged.push(b);
+        }
+        added++;
+      });
       saveAll(merged);
       setState({ batches: merged });
-      alert(`Imported ${imported.length} batch(es).`);
-    } catch {
-      alert("Invalid backup file.");
+      const note = reassigned > 0 ? ` (${reassigned} got a new ID to avoid collision)` : "";
+      alert(`Imported ${added} batch(es)${note}.`);
+    } catch (err) {
+      alert("Invalid JSON file: " + err.message);
     }
   };
   reader.readAsText(file);
