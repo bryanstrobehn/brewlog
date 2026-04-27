@@ -189,6 +189,27 @@ export async function deleteImage(batchId) {
   });
 }
 
+// ─── Pantry / Inventory ───────────────────────────────────────────────────────
+
+const PANTRY_KEY = "brewlog_pantry_v1";
+
+export function loadPantry() {
+  try {
+    const raw = localStorage.getItem(PANTRY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePantry(items) {
+  localStorage.setItem(PANTRY_KEY, JSON.stringify(items));
+}
+
+export function newPantryItem(name = "", amount = "", unit = "") {
+  return { id: crypto.randomUUID(), name, amount, unit, addedAt: new Date().toISOString() };
+}
+
 // ─── Cloud sync (Syncer backend) ─────────────────────────────────────────────
 
 const CLOUD_CONFIG_KEY = "brewlog_cloud_sync";

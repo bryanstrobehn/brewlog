@@ -819,6 +819,91 @@ body {
 
 .tmpl-card-saved { border-style: dashed; }
 
+/* ── Pantry ──────────────────────────────────────────────────────────────── */
+.row-read-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pantry-dot {
+  font-size: 9px;
+  flex-shrink: 0;
+  cursor: default;
+  line-height: 1;
+}
+.pantry-have { color: var(--accent); }
+.pantry-miss { color: var(--border); }
+
+.btn-pantry-add {
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-pantry-add:hover { border-color: var(--accent); color: var(--accent); }
+.btn-pantry-add:disabled { opacity: 0.55; cursor: default; }
+
+.pantry-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.pantry-row:last-child { border-bottom: none; }
+.pantry-row-info    { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.pantry-row-name    { font-size: 14px; }
+.pantry-row-qty     { font-family: var(--mono); font-size: 12px; }
+.pantry-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+.pantry-edit-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.pantry-edit-flex { flex: 1; min-width: 140px; }
+
+.pantry-match-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.pantry-match-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.pantry-match-name { font-size: 14px; }
+.pantry-match-score {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-lt);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #b8dcc8;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pantry-match-detail { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.pantry-match-have   { color: var(--text); }
+
 /* TODO: styles pass — current aesthetic is functional/prototype level.
    Planned: typography scale refinement, spacing rhythm, card polish,
    color palette, better mobile layout, brew mode full-bleed with large tap targets. */

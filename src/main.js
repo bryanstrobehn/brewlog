@@ -7,6 +7,7 @@ import {
   saveSyncHandle, loadSyncHandle, pushToSyncFile, pullFromSyncFile,
   loadCloudConfig, saveCloudConfig, clearCloudConfig,
   cloudPush, cloudPull, backupLocal, loadLocalBackup,
+  loadPantry, savePantry, newPantryItem,
   EMPTY_BATCH, STATUS
 } from "./data.js";
 import TEMPLATES, { TEMPLATE_GROUPS, ALL_TYPES } from "./templates.js";
@@ -14,6 +15,8 @@ import TEMPLATES, { TEMPLATE_GROUPS, ALL_TYPES } from "./templates.js";
 // ─── App state ────────────────────────────────────────────────────────────────
 let state = {
   batches:       loadAll(),
+  pantryItems:   loadPantry(),
+  activeView:    "batches",  // "batches" | "pantry"
   activeBatchId: null,
   activeTab:     "recipe",
   brewMode:      false,
@@ -34,6 +37,8 @@ let syncFolderName        = null;
 let cloudConfig           = loadCloudConfig(); // { vault } or null
 let cloudSettingsExpanded = false;
 let showAllBatches        = false;
+let pantryEditId          = null; // null | "new" | item id
+let pantryResults         = null; // null = not scanned, array = results
 
 // ─── Sync feature flag ────────────────────────────────────────────────────────
 // Visit with ?sync=1 once per device to permanently enable sync UI via localStorage.
@@ -137,7 +142,7 @@ function syncFormToLocalBatch() {
 function render() {
   const app = document.getElementById("app");
   if (!state.activeBatchId) {
-    app.innerHTML = renderListView();
+    app.innerHTML = state.activeView === "pantry" ? renderPantryView() : renderListView();
   } else {
     const batch = currentBatch();
     app.innerHTML = batch ? renderBatchView(batch) : renderListView();
@@ -270,6 +275,138 @@ function bindModalCardEvents() {
   });
 }
 
+// ─── Pantry helpers ───────────────────────────────────────────────────────────
+
+function matchIngredients(pantryItems, recipeIngredients) {
+  const matched = [], missing = [];
+  for (const ing of recipeIngredients) {
+    if (ing.name.toLowerCase().startsWith("water")) { matched.push(ing); continue; }
+    const ingLow = ing.name.toLowerCase();
+    const hit = pantryItems.find(p => {
+      const pLow = p.name.toLowerCase();
+      return pLow.includes(ingLow) || ingLow.includes(pLow);
+    });
+    hit ? matched.push(ing) : missing.push(ing);
+  }
+  return {
+    matched,
+    missing,
+    score: recipeIngredients.length > 0 ? matched.length / recipeIngredients.length : 0,
+  };
+}
+
+function suggestFromPantry(pantryItems) {
+  if (!pantryItems.length) return [];
+  const results = [];
+  for (const [type, tmpl] of Object.entries(TEMPLATES)) {
+    if (!tmpl.ingredients?.length) continue;
+    const { matched, missing, score } = matchIngredients(pantryItems, tmpl.ingredients);
+    if (score > 0) results.push({ name: type, type, matched, missing, total: tmpl.ingredients.length, score });
+  }
+  state.batches.filter(b => b.isTemplate && b.ingredients?.length).forEach(b => {
+    const { matched, missing, score } = matchIngredients(pantryItems, b.ingredients);
+    if (score > 0) results.push({ name: b.name, type: `custom:${b.id}`, matched, missing, total: b.ingredients.length, score });
+  });
+  return results.sort((a, b) => b.score - a.score);
+}
+
+function renderPantryItemRow(item) {
+  return `
+    <div class="pantry-row">
+      <div class="pantry-row-info">
+        <span class="pantry-row-name">${item.name}</span>
+        <span class="muted pantry-row-qty">${item.amount}${item.unit ? " " + item.unit : ""}</span>
+      </div>
+      <div class="pantry-row-actions">
+        <button class="btn-add" data-pantry-edit="${item.id}">Edit</button>
+        <button class="btn-remove" data-pantry-del="${item.id}">×</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPantryItemEdit(item) {
+  return `
+    <div class="pantry-edit-row">
+      <input class="input input-sm pantry-edit-flex" id="pantry-edit-name"
+             value="${(item?.name ?? "").replace(/"/g, "&quot;")}" placeholder="Ingredient name" />
+      <input class="input input-sm input-amount" id="pantry-edit-amount"
+             value="${item?.amount ?? ""}" placeholder="Amount" />
+      <input class="input input-sm input-unit" id="pantry-edit-unit"
+             value="${item?.unit ?? ""}" placeholder="Unit" />
+      <button class="btn btn-primary" id="btn-pantry-save" style="font-size:12px;padding:5px 10px">Save</button>
+      <button class="btn" id="btn-pantry-cancel" style="font-size:12px;padding:5px 10px">Cancel</button>
+    </div>
+  `;
+}
+
+function renderPantryResults() {
+  if (pantryResults === null)
+    return `<p class="empty-hint">Add ingredients above, then tap "Scan templates" to see what you could brew.</p>`;
+  if (pantryResults.length === 0)
+    return `<p class="empty-hint">No matches — ingredient names need to overlap with template names (e.g. "Chocolate malt", "East Kent Goldings").</p>`;
+  return pantryResults.map(r => `
+    <div class="pantry-match-card">
+      <div class="pantry-match-header">
+        <span class="pantry-match-name">${r.name}</span>
+        <span class="pantry-match-score">${r.matched.length}/${r.total} match</span>
+      </div>
+      ${r.matched.length
+        ? `<div class="pantry-match-detail pantry-match-have">Have: ${r.matched.slice(0, 4).map(i => i.name).join(", ")}${r.matched.length > 4 ? ` +${r.matched.length - 4} more` : ""}</div>`
+        : ""}
+      ${r.missing.length
+        ? `<div class="pantry-match-detail pantry-match-miss">Need: ${r.missing.slice(0, 4).map(i => i.name).join(", ")}${r.missing.length > 4 ? ` +${r.missing.length - 4} more` : ""}</div>`
+        : ""}
+      <button class="btn" data-start-from="${r.type}" style="margin-top:8px;font-size:12px">Start batch →</button>
+    </div>
+  `).join("");
+}
+
+function renderPantryView() {
+  const items = state.pantryItems;
+  return `
+    <div class="layout">
+      <header class="topbar">
+        <span class="wordmark"><span class="wordmark-brew">BREW</span><span class="wordmark-dot">.</span><span class="wordmark-log">log</span></span>
+        <div class="topbar-actions">
+          <button class="btn btn-primary" id="btn-new">+ New batch</button>
+        </div>
+      </header>
+
+      <div class="tabs">
+        <button class="tab" data-view="batches">Recipes</button>
+        <button class="tab tab-active" data-view="pantry">Pantry</button>
+      </div>
+
+      <main class="list-main">
+        <section class="section" style="margin-bottom:2rem">
+          <div class="section-header">
+            <span class="section-label">My Pantry</span>
+            <button class="btn-add" id="btn-pantry-add">+ Add</button>
+          </div>
+          ${items.length === 0 && pantryEditId !== "new"
+            ? `<p class="empty-hint">Nothing on hand yet. Add ingredients you've bought, or use "+ Pantry" on any Planning batch.</p>`
+            : items.map(item =>
+                pantryEditId === item.id
+                  ? renderPantryItemEdit(item)
+                  : renderPantryItemRow(item)
+              ).join("")
+          }
+          ${pantryEditId === "new" ? renderPantryItemEdit(null) : ""}
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-label">What else can I make?</span>
+            <button class="btn" id="btn-pantry-scan">Scan templates</button>
+          </div>
+          ${renderPantryResults()}
+        </section>
+      </main>
+    </div>
+  `;
+}
+
 // ─── List view ────────────────────────────────────────────────────────────────
 function renderListView() {
   const regular   = state.batches.filter(b => !b.isTemplate);
@@ -286,6 +423,11 @@ function renderListView() {
           <button class="btn btn-primary" id="btn-new">+ New batch</button>
         </div>
       </header>
+
+      <div class="tabs">
+        <button class="tab tab-active" data-view="batches">Recipes</button>
+        <button class="tab" data-view="pantry">Pantry</button>
+      </div>
 
       <main class="list-main">
         <p class="list-description">A brewing journal that lives in your browser. Track batches from pitch to glass — ingredients, steps, gravity readings, and tasting notes. Data is stored in local browser storage; use data sync options correctly to avoid losing data!</p>
@@ -539,7 +681,11 @@ function renderRecipeTab(batch) {
         ${!ingredientsCollapsed ? (
           batch.ingredients.length === 0
             ? `<p class="empty-hint">No ingredients yet.</p>`
-            : batch.ingredients.map(ing => renderIngredientRow(ing, editing)).join("")
+            : batch.ingredients.map(ing => renderIngredientRow(ing, editing, {
+                pantryItems: state.pantryItems,
+                isPlanning:  batch.status === STATUS.PLANNING,
+                isBrewing:   state.brewMode,
+              })).join("")
         ) : ""}
       </section>
 
@@ -616,14 +762,38 @@ function renderBatchMetaReadOnly(batch) {
   `;
 }
 
-function renderIngredientRow(ing, editing) {
+function renderIngredientRow(ing, editing, pantryCtx = null) {
+  const pantryItems = pantryCtx?.pantryItems ?? [];
+  const isPlanning  = pantryCtx?.isPlanning  ?? false;
+  const isBrewing   = pantryCtx?.isBrewing   ?? false;
+
+  let pantryDot = "";
+  if (pantryItems.length > 0) {
+    const ingLow = ing.name.toLowerCase();
+    const match  = pantryItems.find(p => {
+      const pLow = p.name.toLowerCase();
+      return pLow.includes(ingLow) || ingLow.includes(pLow);
+    });
+    pantryDot = match
+      ? `<span class="pantry-dot pantry-have" title="${match.amount}${match.unit ? " " + match.unit : ""} in pantry">●</span>`
+      : `<span class="pantry-dot pantry-miss" title="Not in pantry">○</span>`;
+  }
+
+  const addBtn = isPlanning && !editing && !isBrewing
+    ? `<button class="btn-pantry-add" data-add-pantry-name="${ing.name.replace(/"/g,"&quot;")}" data-add-pantry-amount="${ing.amount}" data-add-pantry-unit="${ing.unit}">+ Pantry</button>`
+    : "";
+
   if (!editing) return `
     <div class="row-read">
       <div>
         <span>${ing.name}</span>
         ${ing.note ? `<div class="ing-note">${ing.note}</div>` : ""}
       </div>
-      <span class="muted">${ing.amount}${ing.unit ? " " + ing.unit : ""}</span>
+      <div class="row-read-right">
+        <span class="muted">${ing.amount}${ing.unit ? " " + ing.unit : ""}</span>
+        ${pantryDot}
+        ${addBtn}
+      </div>
     </div>
   `;
   return `
@@ -1427,6 +1597,78 @@ function bindEvents() {
       state = { ...state, batches };
       dirty = false;
       render();
+    });
+  });
+
+  // ── View toggle (Recipes / Pantry tabs) ──
+  document.querySelectorAll("[data-view]").forEach(el => {
+    el.addEventListener("click", () => {
+      pantryEditId  = null;
+      pantryResults = null;
+      setState({ activeView: el.dataset.view });
+    });
+  });
+
+  // ── Pantry: open add form ──
+  on("btn-pantry-add", () => { pantryEditId = "new"; render(); });
+
+  // ── Pantry: open edit form ──
+  document.querySelectorAll("[data-pantry-edit]").forEach(el => {
+    el.addEventListener("click", () => { pantryEditId = el.dataset.pantryEdit; render(); });
+  });
+
+  // ── Pantry: delete item ──
+  document.querySelectorAll("[data-pantry-del]").forEach(el => {
+    el.addEventListener("click", () => {
+      const items = state.pantryItems.filter(i => i.id !== el.dataset.pantryDel);
+      savePantry(items);
+      state = { ...state, pantryItems: items };
+      render();
+    });
+  });
+
+  // ── Pantry: save item (add or edit) ──
+  on("btn-pantry-save", () => {
+    const name   = document.getElementById("pantry-edit-name")?.value.trim();
+    const amount = document.getElementById("pantry-edit-amount")?.value.trim() ?? "";
+    const unit   = document.getElementById("pantry-edit-unit")?.value.trim()   ?? "";
+    if (!name) return;
+    const items = pantryEditId === "new"
+      ? [...state.pantryItems, newPantryItem(name, amount, unit)]
+      : state.pantryItems.map(i => i.id === pantryEditId ? { ...i, name, amount, unit } : i);
+    savePantry(items);
+    state        = { ...state, pantryItems: items };
+    pantryEditId = null;
+    render();
+  });
+
+  // ── Pantry: cancel edit ──
+  on("btn-pantry-cancel", () => { pantryEditId = null; render(); });
+
+  // ── Pantry: scan templates ──
+  on("btn-pantry-scan", () => { pantryResults = suggestFromPantry(state.pantryItems); render(); });
+
+  // ── Pantry: start batch from suggestion ──
+  document.querySelectorAll("[data-start-from]").forEach(el => {
+    el.addEventListener("click", () => {
+      const type = el.dataset.startFrom;
+      pantryResults = null;
+      setState({ activeView: "batches" });
+      createNewBatch(type);
+    });
+  });
+
+  // ── Add ingredient to pantry from batch view (Planning status) ──
+  document.querySelectorAll("[data-add-pantry-name]").forEach(el => {
+    el.addEventListener("click", () => {
+      const name   = el.dataset.addPantryName;
+      const amount = el.dataset.addPantryAmount;
+      const unit   = el.dataset.addPantryUnit;
+      const items  = [...state.pantryItems, newPantryItem(name, amount, unit)];
+      savePantry(items);
+      state = { ...state, pantryItems: items };
+      el.textContent = "✓ Added";
+      el.disabled    = true;
     });
   });
 }
