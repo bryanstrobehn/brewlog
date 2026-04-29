@@ -6,7 +6,7 @@ import {
   saveImage, loadAllImages, deleteImage,
   saveSyncHandle, loadSyncHandle, pushToSyncFile, pullFromSyncFile,
   loadCloudConfig, saveCloudConfig, clearCloudConfig,
-  cloudPush, cloudPull, backupLocal, loadLocalBackup,
+  cloudPush, cloudPull, backupLocal, loadLocalBackup, getDeviceName,
   loadPantry, savePantry, newPantryItem,
   EMPTY_BATCH, STATUS
 } from "./data.js";
@@ -36,6 +36,12 @@ let modalSelected        = "blank";
 let syncFolderName        = null;
 let cloudConfig           = loadCloudConfig(); // { vault } or null
 let cloudSettingsExpanded = false;
+
+const CLOUD_META_KEY  = "brewlog_cloud_sync_meta";
+const FOLDER_META_KEY = "brewlog_folder_sync_meta";
+function loadMeta(key) { try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch { return null; } }
+let cloudSyncMeta  = loadMeta(CLOUD_META_KEY);
+let folderSyncMeta = loadMeta(FOLDER_META_KEY);
 let showAllBatches        = false;
 let pantryEditId          = null; // null | "new" | item id
 let pantryResults         = null; // null = not scanned, array = results
@@ -78,6 +84,19 @@ function setState(partial) {
     dirty = false;
   }
   render();
+}
+
+function fmtSyncMeta(meta) {
+  const d = new Date(meta.syncedAt);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const timeStr = isToday
+    ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const countStr = meta.batchCount != null ? ` · ${meta.batchCount} batch${meta.batchCount === 1 ? "" : "es"}` : "";
+  if (meta.direction === "push") return `↑ Pushed ${timeStr}${countStr} from ${meta.deviceName || "this device"}`;
+  const from = meta.remoteDevice ? ` · from ${meta.remoteDevice}` : "";
+  return `↓ Pulled ${timeStr}${countStr}${from}`;
 }
 
 // Update the Save button label in-place without a full re-render (called during typing).
@@ -479,6 +498,7 @@ function renderListView() {
                  <button class="btn btn-primary" id="btn-cloud-connect">Connect</button>`
             }
           </div>
+          ${cloudConfig && cloudSyncMeta ? `<p class="sync-meta">${fmtSyncMeta(cloudSyncMeta)}</p>` : ""}
           ${cloudConfig && cloudSettingsExpanded ? `
             <div class="sync-settings-panel">
               <div class="sync-settings-row">
@@ -507,6 +527,7 @@ function renderListView() {
                    <button class="btn" id="btn-sync-connect">Connect folder…</button>`
               }
             </div>
+            ${syncFolderName && folderSyncMeta ? `<p class="sync-meta">${fmtSyncMeta(folderSyncMeta)}</p>` : ""}
           </div>
         ` : ""}
 
@@ -1058,8 +1079,13 @@ function bindEvents() {
     if (!confirm("Push will overwrite the sync file with your local data. Any data on other devices that hasn't been pulled will be lost. Continue?")) return;
     const btn = document.getElementById("btn-sync-push");
     try {
-      await pushToSyncFile(state.batches);
-      if (btn) { const orig = btn.textContent; btn.textContent = "↑ Pushed!"; setTimeout(() => { btn.textContent = orig; }, 2000); }
+      const deviceName = getDeviceName();
+      await pushToSyncFile(state.batches, deviceName);
+      folderSyncMeta = { syncedAt: new Date().toISOString(), direction: "push", deviceName, batchCount: state.batches.length };
+      localStorage.setItem(FOLDER_META_KEY, JSON.stringify(folderSyncMeta));
+      render();
+      const newBtn = document.getElementById("btn-sync-push");
+      if (newBtn) { newBtn.textContent = "↑ Pushed!"; setTimeout(() => { const b = document.getElementById("btn-sync-push"); if (b) b.textContent = "↑ Push"; }, 2000); }
     } catch (e) {
       alert("Push failed: " + e.message);
     }
@@ -1067,18 +1093,20 @@ function bindEvents() {
 
   on("btn-sync-pull", async () => {
     if (!confirm("Pull will overwrite your local data with the sync file. Any unsaved local changes will be lost. Continue?")) return;
-    const btn = document.getElementById("btn-sync-pull");
     try {
-      const imported = await pullFromSyncFile();
-      if (!imported) { alert("No sync file found yet. Push from another device first."); return; }
+      const result = await pullFromSyncFile();
+      if (!result) { alert("No sync file found yet. Push from another device first."); return; }
       const merged = [...state.batches];
-      imported.forEach(b => {
+      result.batches.forEach(b => {
         const idx = merged.findIndex(x => x.id === b.id);
         if (idx >= 0) merged[idx] = b; else merged.push(b);
       });
       saveAll(merged);
+      folderSyncMeta = { syncedAt: new Date().toISOString(), direction: "pull", remoteDevice: result.deviceName ?? null, batchCount: result.batches.length };
+      localStorage.setItem(FOLDER_META_KEY, JSON.stringify(folderSyncMeta));
       setState({ batches: merged });
-      if (btn) { const orig = btn.textContent; btn.textContent = "↓ Pulled!"; setTimeout(() => { btn.textContent = orig; }, 2000); }
+      const newBtn = document.getElementById("btn-sync-pull");
+      if (newBtn) { newBtn.textContent = "↓ Pulled!"; setTimeout(() => { const b = document.getElementById("btn-sync-pull"); if (b) b.textContent = "↓ Pull"; }, 2000); }
     } catch (e) {
       alert("Pull failed: " + e.message);
     }
@@ -1123,10 +1151,15 @@ function bindEvents() {
     const btn = document.getElementById("btn-cloud-push");
     try {
       if (btn) btn.textContent = "Pushing…";
+      const deviceName = getDeviceName();
       const pushedAt = new Date().toISOString();
-      await cloudPush(state.batches, cloudConfig.vault);
+      await cloudPush(state.batches, cloudConfig.vault, deviceName);
       localStorage.setItem("brewlog_cloud_last_push", JSON.stringify(pushedAt));
-      if (btn) { btn.textContent = "↑ Pushed!"; setTimeout(() => { btn.textContent = "↑ Push"; }, 2000); }
+      cloudSyncMeta = { syncedAt: pushedAt, direction: "push", deviceName, batchCount: state.batches.length };
+      localStorage.setItem(CLOUD_META_KEY, JSON.stringify(cloudSyncMeta));
+      render();
+      const newBtn = document.getElementById("btn-cloud-push");
+      if (newBtn) { newBtn.textContent = "↑ Pushed!"; setTimeout(() => { const b = document.getElementById("btn-cloud-push"); if (b) b.textContent = "↑ Push"; }, 2000); }
     } catch (e) {
       if (btn) btn.textContent = "↑ Push";
       alert("Push failed: " + e.message);
@@ -1149,8 +1182,11 @@ function bindEvents() {
       backupLocal();
       saveAll(envelope.data);
       localStorage.setItem("brewlog_cloud_last_push", JSON.stringify(envelope.updatedAt));
+      cloudSyncMeta = { syncedAt: envelope.updatedAt, direction: "pull", remoteDevice: envelope.deviceName ?? null, batchCount: envelope.data.length };
+      localStorage.setItem(CLOUD_META_KEY, JSON.stringify(cloudSyncMeta));
       setState({ batches: envelope.data });
-      if (btn) { btn.textContent = "↓ Pulled!"; setTimeout(() => { btn.textContent = "↓ Pull"; }, 2000); }
+      const newBtn = document.getElementById("btn-cloud-pull");
+      if (newBtn) { newBtn.textContent = "↓ Pulled!"; setTimeout(() => { const b = document.getElementById("btn-cloud-pull"); if (b) b.textContent = "↓ Pull"; }, 2000); }
     } catch (e) {
       if (btn) btn.textContent = "↓ Pull";
       alert("Pull failed: " + e.message);

@@ -210,6 +210,31 @@ export function newPantryItem(name = "", amount = "", unit = "") {
   return { id: crypto.randomUUID(), name, amount, unit, addedAt: new Date().toISOString() };
 }
 
+// ─── Device identity ─────────────────────────────────────────────────────────
+
+export function getDeviceName() {
+  const stored = localStorage.getItem("brewlog_device_name");
+  if (stored) return stored;
+  const platform = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  let os = "Unknown";
+  if (platform.startsWith("Win") || /Windows/.test(ua)) os = "Windows";
+  else if (platform.startsWith("Mac") && !/iPhone|iPad/.test(ua)) os = "Mac";
+  else if (/iPhone/.test(ua) || platform === "iPhone") os = "iPhone";
+  else if (/iPad/.test(ua) || platform === "iPad") os = "iPad";
+  else if (/Android/.test(ua)) os = "Android";
+  else if (platform.startsWith("Linux")) os = "Linux";
+  let browser = "Browser";
+  if (/Edg\//.test(ua)) browser = "Edge";
+  else if (/OPR\//.test(ua)) browser = "Opera";
+  else if (/Chrome\//.test(ua)) browser = "Chrome";
+  else if (/Firefox\//.test(ua)) browser = "Firefox";
+  else if (/Safari\//.test(ua)) browser = "Safari";
+  const name = `${os} / ${browser}`;
+  localStorage.setItem("brewlog_device_name", name);
+  return name;
+}
+
 // ─── Cloud sync (Syncer backend) ─────────────────────────────────────────────
 
 const CLOUD_CONFIG_KEY = "brewlog_cloud_sync";
@@ -233,10 +258,10 @@ export function clearCloudConfig() {
   localStorage.removeItem(CLOUD_CONFIG_KEY);
 }
 
-export async function cloudPush(batches, vault) {
+export async function cloudPush(batches, vault, deviceName) {
   const { SyncClient } = await import("./sync-client.js");
   const client = new SyncClient({ endpoint: CLOUD_ENDPOINT, vault, app: "brewlog" });
-  await client.push({ data: batches, updatedAt: new Date().toISOString() });
+  await client.push({ data: batches, updatedAt: new Date().toISOString(), deviceName });
 }
 
 export async function cloudPull(vault) {
@@ -308,11 +333,11 @@ async function getSyncDir() {
   return handle;
 }
 
-export async function pushToSyncFile(batches) {
+export async function pushToSyncFile(batches, deviceName) {
   const dir      = await getSyncDir();
   const file     = await dir.getFileHandle(SYNC_FILE_NAME, { create: true });
   const writable = await file.createWritable();
-  await writable.write(JSON.stringify({ version: 1, exported: new Date().toISOString(), batches }, null, 2));
+  await writable.write(JSON.stringify({ version: 1, exported: new Date().toISOString(), deviceName, batches }, null, 2));
   await writable.close();
 }
 
@@ -323,9 +348,10 @@ export async function pullFromSyncFile() {
     const f    = await file.getFile();
     const text = await f.text();
     const data = JSON.parse(text);
-    return Array.isArray(data) ? data : data.batches ?? [];
+    if (Array.isArray(data)) return { batches: data, deviceName: null, exported: null };
+    return { batches: data.batches ?? [], deviceName: data.deviceName ?? null, exported: data.exported ?? null };
   } catch (e) {
-    if (e.name === "NotFoundError") return null; // file not pushed yet
+    if (e.name === "NotFoundError") return null;
     throw e;
   }
 }

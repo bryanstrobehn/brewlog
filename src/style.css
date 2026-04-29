@@ -755,6 +755,7 @@ body {
 }
 .sync-status { font-size: 13px; }
 .sync-strip-actions { display: flex; gap: 6px; }
+.sync-meta { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
 
 .sync-settings-panel {
   display: flex;
